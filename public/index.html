@@ -513,7 +513,7 @@
   // Covers every status the signup lifecycle can reach, not just the
   // pre-outcome ones — otherwise a Flaked/Attended/Dropped/Lost signup
   // silently renders as "Not signed up", which is actively misleading.
-  function signupStatusPill(ss, showNotSignedUp) {
+  function signupStatusPill(ss, showNotSignedUp, notOpenYet) {
     if (ss === 'Pending')  return '<span class="pill signed-up">Pending Lottery</span>';
     if (ss === 'Invited')  return '<span class="pill invited">Invited</span>';
     if (ss === 'Waitlist') return '<span class="pill waitlist">Waitlisted</span>';
@@ -521,6 +521,7 @@
     if (ss === 'Flaked')   return '<span class="pill flaked">Flaked</span>';
     if (ss === 'Dropped')  return '<span class="pill declined">Declined</span>';
     if (ss === 'Lost')     return '<span class="pill lost">Not selected</span>';
+    if (notOpenYet) return '<span class="pill not-signed-up">Signups not open</span>';
     return showNotSignedUp ? '<span class="pill not-signed-up">Not signed up</span>' : '';
   }
 
@@ -533,7 +534,7 @@
       return '<tr>' +
         '<td>' + esc(ev.name) + '</td>' +
         '<td>' + esc(fmtDate(ev.event_date)) + '</td>' +
-        '<td>' + signupStatusPill(ev.signup_status, true) + '</td>' +
+        '<td>' + signupStatusPill(ev.signup_status, true, ev.status !== 'Open') + '</td>' +
       '</tr>';
     }).join('');
   }
