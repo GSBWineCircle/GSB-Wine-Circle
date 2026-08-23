@@ -449,7 +449,8 @@
             <div class="action-group-label">Lottery &amp; Invites</div>
             <div class="action-group-buttons">
               <button class="btn-primary   btn-sm" id="btn-run-lottery"    onclick="eventAction('run-lottery')">Run Lottery</button>
-              <button class="btn-success   btn-sm" id="btn-create-calendar-invite" onclick="openCalendarInvite()">Create Calendar Invite</button>
+              <button class="btn-secondary btn-sm" id="btn-calendar-hold"  onclick="openCalendarHold()">Send Calendar Hold (Whole Club)</button>
+              <button class="btn-success   btn-sm" id="btn-create-calendar-invite" onclick="openCalendarInvite()">Send Confirmed Invite (Winners)</button>
               <button class="btn-secondary btn-sm" id="btn-send-lost"      onclick="eventAction('send-lost')">Send Lost Emails</button>
             </div>
           </div>
@@ -1449,6 +1450,31 @@ async function eventAction(action) {
   });
 }
 
+// Google Calendar's quick-add "details" field accepts a limited set of HTML
+// (e.g. <b>), same as the rich-text editor in Calendar's own UI — escape any
+// literal angle brackets in plain-text content first so they can't be
+// mistaken for markup, then wrap the intended bold spans in real <b> tags.
+function escCalDetails(s) {
+  return String(s == null ? '' : s).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function buildCalendarUrl({ title, details, event, extraGuests }) {
+  const start = event.event_date ? new Date(event.event_date) : new Date();
+  const end = new Date(start.getTime() + 2 * 60 * 60 * 1000); // no end-time field exists; default 2h
+  const fmt = d => d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+
+  const params = new URLSearchParams({
+    action: 'TEMPLATE',
+    text: title,
+    dates: `${fmt(start)}/${fmt(end)}`,
+    details,
+    location: event.location || '',
+  });
+  if (extraGuests && extraGuests.length) params.set('add', extraGuests.join(','));
+  return `https://calendar.google.com/calendar/render?${params.toString()}`;
+}
+
+// "Confirmed" invite — sent only to this event's lottery winners (Invited signups).
 async function openCalendarInvite() {
   try {
     const evRes = await api('GET', `/events/${currentEventId}`);
@@ -1456,20 +1482,39 @@ async function openCalendarInvite() {
     const sigRes = await api('GET', `/events/${currentEventId}/signups`);
     const invited = (sigRes.signups || sigRes).filter(s => s.status === 'Invited');
 
-    const start = ev.event_date ? new Date(ev.event_date) : new Date();
-    const end = new Date(start.getTime() + 2 * 60 * 60 * 1000); // no end-time field exists; default 2h
-    const fmt = d => d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+    const title = `Confirmed - ${ev.name || 'Wine Circle Event'}`;
+    const details =
+      `Congrats - you are confirmed for the ${escCalDetails(ev.name)}!\n\n` +
+      escCalDetails(ev.description || '') +
+      `\n\n<b>Please note that no-shows with &lt;24 hr notice and check-in &gt;20 min late will both require payment of the no-show fee.</b>`;
 
-    const params = new URLSearchParams({
-      action: 'TEMPLATE',
-      text: ev.name || 'Wine Circle Event',
-      dates: `${fmt(start)}/${fmt(end)}`,
-      details: ev.description || '',
-      location: ev.location || '',
+    const url = buildCalendarUrl({
+      title, details, event: ev,
+      extraGuests: invited.map(s => s.member_email),
     });
-    if (invited.length) params.set('add', invited.map(s => s.member_email).join(','));
+    window.open(url, '_blank');
+  } catch (e) {
+    toast('Error: ' + e.message, 'error');
+  }
+}
 
-    window.open(`https://calendar.google.com/calendar/render?${params.toString()}`, '_blank');
+// "Hold" invite — a courtesy save-the-date sent club-wide, before the lottery
+// runs, making clear it's not yet a confirmed spot.
+async function openCalendarHold() {
+  try {
+    const evRes = await api('GET', `/events/${currentEventId}`);
+    const ev = evRes.event || evRes;
+
+    const title = `[FYI Only | Lottery TBA] ${ev.name || 'Wine Circle Event'}`;
+    const details =
+      `<b>Please note: We're sharing this invite as a courtesy placeholder. Entry to the event requires signing up for the lottery when it opens</b>` +
+      (ev.description ? `\n\n${escCalDetails(ev.description)}` : '');
+
+    const url = buildCalendarUrl({
+      title, details, event: ev,
+      extraGuests: ['gsb_winecircle@lists.stanford.edu'],
+    });
+    window.open(url, '_blank');
   } catch (e) {
     toast('Error: ' + e.message, 'error');
   }
