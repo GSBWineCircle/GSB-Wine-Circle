@@ -376,7 +376,17 @@
       try {
         var res = await apiFetch('GET', '/auth/me');
         if (res.ok) { member = res.member; showHome(); return; }
-      } catch (e) { /* fall through */ }
+      } catch (e) {
+        // Only discard the stored token when the server actually told us the
+        // session is bad (401). A 5xx or a dropped connection means we simply
+        // couldn't check - throwing the token away there would sign out a
+        // legitimately logged-in member because the server was briefly busy.
+        if (e.status !== 401) {
+          setErr('login-err', "Couldn't reach the server. Please refresh in a moment.");
+          showLogin();
+          return;
+        }
+      }
       try { localStorage.removeItem(TOKEN_KEY); } catch (e) {}
     }
     showLogin();

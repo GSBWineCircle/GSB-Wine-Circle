@@ -1069,7 +1069,11 @@ async function api(method, path, body) {
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  if (!res.ok) {
+    const err = new Error(data.error || `HTTP ${res.status}`);
+    err.status = res.status; // callers distinguish "bad session" (401) from "server busy" (5xx)
+    throw err;
+  }
   return data;
 }
 
@@ -1082,7 +1086,16 @@ async function init() {
       if (!me.is_admin) throw new Error('Not an admin account');
       currentMember = me;
       showApp();
-    } catch {
+    } catch (e) {
+      // Keep the stored token unless the server actually rejected it. A 5xx
+      // or network blip means we couldn't verify, not that the session is
+      // dead - discarding it there signs out a valid admin over a transient
+      // error (seen under load when the DB pool was exhausted).
+      if (e.status && e.status >= 500) {
+        showLogin();
+        showAlert('login-alert', "Couldn't reach the server. Please refresh in a moment.", 'error');
+        return;
+      }
       sessionToken = null;
       localStorage.removeItem('admin_token');
       showLogin();
