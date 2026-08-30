@@ -4,6 +4,10 @@ name: Keep app warm
 # causing the next real request to cold-start (slow, and can 502 under a
 # concurrent burst). Pinging well under that threshold keeps it warm.
 #
+# Pings the custom domain rather than a *.onrender.com URL, so this keeps
+# working across any future Render service/account change as long as the
+# domain still points at the live deployment.
+#
 # Note: GitHub disables scheduled workflows automatically after 60 days
 # with no repo activity. Any push/commit resets that clock, so normal
 # maintenance keeps this alive - if the repo goes fully dormant for two
@@ -19,4 +23,4 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Ping health endpoint
-        run: curl -sS -m 15 --fail https://wine-circle-app.onrender.com/api/health
+        run: curl -sS -m 15 --fail https://gsb.wine/api/health
