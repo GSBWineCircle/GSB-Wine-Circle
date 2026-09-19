@@ -570,8 +570,17 @@
           <select id="members-year-filter" onchange="filterMembers()">
             <option value="">All Years</option>
           </select>
+          <select id="members-role-filter" onchange="filterMembers()">
+            <option value="">All Roles</option>
+            <option value="member">Member</option>
+            <option value="admin">Admin</option>
+            <option value="exec">Exec Team</option>
+          </select>
+          <select id="members-affiliation-filter" onchange="filterMembers()">
+            <option value="">All Affiliations</option>
+          </select>
           <div class="spacer"></div>
-          <button class="btn-danger btn-sm" id="btn-delete-selected-members" style="display:none;" onclick="deleteSelectedMembers()">Delete Selected</button>
+          <button class="btn-danger btn-sm" id="btn-delete-selected-members" style="display:none; margin-left:auto;" onclick="deleteSelectedMembers()">Delete Selected</button>
         </div>
         <div class="card table-wrap">
           <table>
@@ -1696,6 +1705,7 @@ async function loadMembers() {
     allMembers = membersRes.members || membersRes;
     selectedMemberIds = new Set();
     populateYearFilter();
+    populateAffiliationFilter();
     renderMembers();
   } catch (e) {
     tbody.innerHTML = `<tr class="loading-row"><td colspan="11" class="text-danger">Error: ${esc(e.message)}</td></tr>`;
@@ -1710,6 +1720,23 @@ function populateYearFilter() {
   sel.value = years.includes(current) ? current : '';
 }
 
+// Affiliation is free text, so the options are built from whatever values
+// actually exist on the roster. Blank affiliations get their own entry so
+// they're easy to find and clean up.
+const NO_AFFILIATION = '__none__';
+
+function populateAffiliationFilter() {
+  const sel = document.getElementById('members-affiliation-filter');
+  const current = sel.value;
+  const affs = [...new Set(allMembers.map(m => (m.affiliation || '').trim()).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+  const hasBlank = allMembers.some(m => !(m.affiliation || '').trim());
+  sel.innerHTML = '<option value="">All Affiliations</option>' +
+    affs.map(a => `<option value="${esc(a)}">${esc(a)}</option>`).join('') +
+    (hasBlank ? `<option value="${NO_AFFILIATION}">(No affiliation)</option>` : '');
+  sel.value = (affs.includes(current) || (hasBlank && current === NO_AFFILIATION)) ? current : '';
+}
+
 function filterMembers() {
   renderMembers();
 }
@@ -1718,6 +1745,8 @@ function renderMembers() {
   const search = (document.getElementById('members-search')?.value || '').toLowerCase();
   const status = document.getElementById('members-status-filter')?.value || '';
   const year   = document.getElementById('members-year-filter')?.value || '';
+  const role   = document.getElementById('members-role-filter')?.value || '';
+  const affil  = document.getElementById('members-affiliation-filter')?.value || '';
   const tbody  = document.getElementById('members-tbody');
   const isExec = !!currentMember?.is_exec_team;
   document.getElementById('btn-delete-selected-members').style.display = isExec ? '' : 'none';
@@ -1727,6 +1756,14 @@ function renderMembers() {
   if (search) list = list.filter(m => (m.full_name + m.email).toLowerCase().includes(search));
   if (status) list = list.filter(m => m.status === status);
   if (year) list = list.filter(m => m.school_year === year);
+  // Role filter matches the badges shown in the Roles column: "Admin" is
+  // anyone with the Admin badge (Exec members are typically Admins too),
+  // "Member" is anyone with neither badge.
+  if (role === 'member') list = list.filter(m => !m.is_admin && !m.is_exec_team);
+  else if (role === 'admin') list = list.filter(m => m.is_admin);
+  else if (role === 'exec') list = list.filter(m => m.is_exec_team);
+  if (affil === NO_AFFILIATION) list = list.filter(m => !(m.affiliation || '').trim());
+  else if (affil) list = list.filter(m => (m.affiliation || '').trim() === affil);
   if (!list.length) {
     tbody.innerHTML = '<tr class="loading-row"><td colspan="11" style="color:var(--muted)">No members found.</td></tr>';
     return;
