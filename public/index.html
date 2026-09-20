@@ -909,12 +909,15 @@
     var date = btn.getAttribute('data-event-date');
     document.getElementById('commit-event-name').textContent = name + (date ? ' — ' + fmtDate(date) : '');
 
+    // The notice window comes from the same setting the server enforces when a
+    // decline is processed (24 hours unless leadership changes it), so this text
+    // can't disagree with what actually happens. The fee amount is deliberately
+    // not shown here.
     var graceHours = parseInt(settings.decline_grace_window_hours) || 24;
-    var feeAmt = settings.flake_fee_amount || '30';
     document.getElementById('commit-terms').textContent =
-      'Spots are awarded by lottery. If you win, you are expected to attend. If your plans change, ' +
-      'decline your invitation at least ' + graceHours + ' hours before the event. No-shows and late ' +
-      'declines are charged a $' + feeAmt + ' fee, and your membership is paused until it is paid.';
+      'Spots are awarded by lottery. If you win, you are expected to attend. Declines must be made ' +
+      'at least ' + graceHours + ' hours before the event. No-shows and later declines incur a ' +
+      'no-show fee, and your membership is paused until it is paid.';
 
     // Fresh every time, so one event's confirmation can never carry over to another.
     var box = document.getElementById('commit-checkbox');
