@@ -250,6 +250,35 @@ router.patch('/:id', requireAdmin, async (req, res) => {
       updates.exec_notes = req.body.exec_notes;
     }
 
+    // Email used to be silently dropped here (it wasn't in `allowed`), so the
+    // edit form reported "Member updated" while the address never changed.
+    // It's the member's login identity - codes are sent to it and matched
+    // against it - so a change gets more care than the plain fields above:
+    //  - normalized the same way POST / does, and must look like an address;
+    //  - must not collide with another member;
+    //  - changing an Admin/Exec account's email is Exec-only, because pointing
+    //    that address at somewhere you control would let you sign in as them.
+    if (req.body.email !== undefined) {
+      const newEmail = String(req.body.email).trim().toLowerCase();
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(newEmail)) {
+        return res.status(400).json({ error: 'Please enter a valid email address.' });
+      }
+      // Compare case-insensitively so re-sending the unchanged value (as the
+      // edit form always does) is a no-op rather than a permission check.
+      if (newEmail !== String(old.email).trim().toLowerCase()) {
+        if ((old.is_admin || old.is_exec_team) && !req.member.is_exec_team) {
+          return res.status(403).json({ error: "Only Exec Team members can change an Admin or Exec Team member's email." });
+        }
+        const { rows: clash } = await db.query(
+          'SELECT 1 FROM members WHERE LOWER(email) = $1 AND member_id != $2', [newEmail, id]
+        );
+        if (clash.length) {
+          return res.status(409).json({ error: 'Another member already uses that email address.' });
+        }
+        updates.email = newEmail;
+      }
+    }
+
     if (!Object.keys(updates).length) {
       return res.status(400).json({ error: 'No valid fields to update' });
     }
@@ -273,6 +302,11 @@ router.patch('/:id', requireAdmin, async (req, res) => {
     await audit(req.member.email, 'UpdateMember', 'members', id, old, updates);
     return res.json({ member: rows[0] });
   } catch (err) {
+    // Backstop for a race the SELECT above can't close: two edits claiming the
+    // same address at once hit the UNIQUE constraint on members.email.
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'Another member already uses that email address.' });
+    }
     console.error(err);
     res.status(500).json({ error: 'Internal error' });
   }
