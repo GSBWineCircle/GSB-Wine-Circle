@@ -1851,6 +1851,7 @@ function renderMembers() {
           <button class="btn-secondary btn-sm" onclick="openEditMember('${m.member_id}')">Edit</button>
           ${m.fee_balance > 0 && currentMember?.is_exec_team ? `<button class="btn-success btn-sm" data-member-id="${esc(m.member_id)}" data-full-name="${esc(m.full_name)}" data-balance="${esc(String(m.fee_balance))}" onclick="openPayment(this.dataset.memberId, this.dataset.fullName, parseFloat(this.dataset.balance))">Pay</button>` : ''}
           ${m.status !== 'Inactive' ? `<button class="btn-danger btn-sm" data-member-id="${esc(m.member_id)}" data-full-name="${esc(m.full_name)}" onclick="deactivateMember(this.dataset.memberId, this.dataset.fullName)">Deactivate</button>` : ''}
+          ${isExec && m.member_id !== currentMember.member_id ? `<button class="btn-secondary btn-sm" style="color:var(--danger); border-color:var(--danger);" data-member-id="${esc(m.member_id)}" data-full-name="${esc(m.full_name)}" onclick="deleteMember(this.dataset.memberId, this.dataset.fullName)">Delete</button>` : ''}
         </div>
       </td>
     </tr>
@@ -1867,6 +1868,28 @@ function toggleSelectAllMembers(checked) {
     cb.checked = checked;
     onMemberCheckboxChange(cb.value, checked);
   });
+}
+
+// Single-member delete from the row's Delete button (Exec Team only). Uses the
+// same bulk-delete endpoint and typed-"delete" confirmation as Delete Selected;
+// the server independently enforces Exec Team and refuses self-deletion.
+function deleteMember(memberId, fullName) {
+  if (!currentMember?.is_exec_team) return;
+  if (memberId === currentMember.member_id) return toast("You can't delete your own account.", 'error');
+  confirmWithTypedDelete(
+    'Delete Member',
+    `Permanently delete ${fullName}? This cannot be undone: their entire signup and fee history will be deleted too. If they have simply left the club, use Deactivate instead.`,
+    async () => {
+      try {
+        await api('POST', '/members/bulk-delete', { member_ids: [memberId] });
+        toast(`Deleted ${fullName}`, 'success');
+        selectedMemberIds.delete(memberId);
+        await loadMembers();
+      } catch (e) {
+        toast('Error: ' + e.message, 'error');
+      }
+    }
+  );
 }
 
 async function deleteSelectedMembers() {
