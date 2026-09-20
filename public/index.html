@@ -177,6 +177,14 @@
       padding: 8px 10px; border-radius: 3px; margin-bottom: 16px; font-size: 13px;
     }
     .overlay-actions { display: flex; gap: 8px; justify-content: flex-end; }
+    /* Lottery commitment overlay */
+    .overlay-box .commit-terms { margin-bottom: 14px; color: var(--muted); }
+    .commit-check {
+      display: flex; align-items: flex-start; gap: 10px; margin: 0 0 18px; padding: 10px 12px;
+      background: var(--cream); border: 1px solid var(--line); border-radius: 6px;
+      font-size: 14px; font-weight: 600; cursor: pointer;
+    }
+    .commit-check input { margin-top: 3px; width: 18px; height: 18px; flex: none; accent-color: var(--burgundy); cursor: pointer; }
     /* Calendar */
     .calendar-wrap { background: white; border: 1px solid var(--line); border-radius: 6px; padding: 16px; }
     .cal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; font-weight: 600; font-size: 14px; }
@@ -318,6 +326,23 @@
     <div class="overlay-actions">
       <button class="btn secondary" onclick="closeDeclineOverlay()">Cancel</button>
       <button class="btn danger" id="decline-confirm-btn" onclick="confirmDecline()">Yes, decline</button>
+    </div>
+  </div>
+</div>
+
+<!-- Lottery commitment overlay: shown before a signup is actually sent -->
+<div id="commit-overlay" class="overlay" style="display:none">
+  <div class="overlay-box">
+    <h3>Enter the lottery?</h3>
+    <p id="commit-event-name" style="margin-bottom:8px;font-weight:600"></p>
+    <p class="commit-terms" id="commit-terms"></p>
+    <label class="commit-check" for="commit-checkbox">
+      <input type="checkbox" id="commit-checkbox" onchange="onCommitToggle()" />
+      <span>I commit to attending this event if I win a spot.</span>
+    </label>
+    <div class="overlay-actions">
+      <button class="btn secondary" onclick="closeCommitOverlay()">Cancel</button>
+      <button class="btn" id="commit-confirm-btn" onclick="confirmCommit()" disabled>Enter lottery</button>
     </div>
   </div>
 </div>
@@ -566,7 +591,9 @@
         (meta ? '<div class="meta">' + esc(meta) + '</div>' : '') +
         dollarLine +
         (ev.description ? '<div class="desc">' + esc(ev.description) + '</div>' : '') +
-        '<button class="btn" ' + btnDisabled + ' data-id="' + esc(ev.event_id) + '" onclick="signUp(this)">' +
+        '<button class="btn" ' + btnDisabled + ' data-id="' + esc(ev.event_id) + '"' +
+          ' data-event-name="' + esc(ev.name) + '" data-event-date="' + esc(ev.event_date || '') + '"' +
+          ' onclick="openCommitOverlay(this)">' +
           esc(btnLabel) +
         '</button>' +
       '</div>';
@@ -869,6 +896,48 @@
     document.getElementById('code').value = '';
     setErr('login-err', '');
     setErr('verify-err', '');
+  }
+
+  // "Enter lottery" no longer signs up directly: it opens a confirmation that
+  // the member is committing to attend if they win, and only that overlay's
+  // confirm button calls signUp() below.
+  var pendingSignupBtn = null;
+
+  function openCommitOverlay(btn) {
+    pendingSignupBtn = btn;
+    var name = btn.getAttribute('data-event-name') || 'this event';
+    var date = btn.getAttribute('data-event-date');
+    document.getElementById('commit-event-name').textContent = name + (date ? ' — ' + fmtDate(date) : '');
+
+    var graceHours = parseInt(settings.decline_grace_window_hours) || 24;
+    var feeAmt = settings.flake_fee_amount || '30';
+    document.getElementById('commit-terms').textContent =
+      'Spots are awarded by lottery. If you win, you are expected to attend. If your plans change, ' +
+      'decline your invitation at least ' + graceHours + ' hours before the event. No-shows and late ' +
+      'declines are charged a $' + feeAmt + ' fee, and your membership is paused until it is paid.';
+
+    // Fresh every time, so one event's confirmation can never carry over to another.
+    var box = document.getElementById('commit-checkbox');
+    box.checked = false;
+    document.getElementById('commit-confirm-btn').disabled = true;
+    document.getElementById('commit-overlay').style.display = 'flex';
+    box.focus();
+  }
+
+  function closeCommitOverlay() {
+    document.getElementById('commit-overlay').style.display = 'none';
+    pendingSignupBtn = null;
+  }
+
+  function onCommitToggle() {
+    document.getElementById('commit-confirm-btn').disabled = !document.getElementById('commit-checkbox').checked;
+  }
+
+  function confirmCommit() {
+    if (!document.getElementById('commit-checkbox').checked || !pendingSignupBtn) return;
+    var btn = pendingSignupBtn;
+    closeCommitOverlay();
+    signUp(btn);
   }
 
   async function signUp(btn) {
