@@ -58,17 +58,18 @@ function assignLotteryResults(pendingSignups, capacity) {
 
 /**
  * Same as assignLotteryResults, except every priority=true entrant is
- * guaranteed Invited (Exec Team always wins), and only the remaining
- * capacity is drawn at random from everyone else. Priority entrants still
- * get a random relative rank among themselves - they aren't ranked ahead
- * by being first in the input, only by never landing on the waitlist.
+ * guaranteed Invited (Admins and Exec Team always win), and only the
+ * remaining capacity is drawn at random from everyone else. Priority
+ * entrants still get a random relative rank among themselves - they
+ * aren't ranked ahead by being first in the input, only by never landing
+ * on the waitlist.
  *
  * If priority entrants alone outnumber capacity, they are ALL still
- * Invited (capacity is exceeded rather than waitlisting an Exec member) -
- * "always wins" is treated as an absolute guarantee, not one bounded by
- * capacity. With ~4 Exec Team members against typical 30-60 capacities
- * this should not occur in practice, but is handled rather than assumed
- * away.
+ * Invited (capacity is exceeded rather than waitlisting an Admin/Exec
+ * member) - "always wins" is treated as an absolute guarantee, not one
+ * bounded by capacity. With ~12 Admin/Exec members against typical 30-60
+ * capacities this should not occur in practice, but is handled rather
+ * than assumed away.
  *
  * @param {Array<{signup_id: string, priority: boolean}>} pendingSignups — already shuffled or in desired order
  * @param {number} capacity

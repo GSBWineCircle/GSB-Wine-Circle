@@ -183,11 +183,11 @@ router.post('/:id/run-lottery', requireAdmin, async (req, res) => {
       return res.status(400).json({ error: 'Event must be Open or Closed to run lottery' });
     }
 
-    // Get all pending signups, plus each entrant's Exec Team status - Exec
-    // Team members always win, so priority has to be decided here, not
+    // Get all pending signups, plus each entrant's Admin/Exec status - Admins
+    // and Exec Team always win, so priority has to be decided here, not
     // inferred later.
     const { rows: pending } = await client.query(
-      `SELECT s.signup_id, m.is_exec_team
+      `SELECT s.signup_id, m.is_admin, m.is_exec_team
        FROM signups s JOIN members m ON m.member_id = s.member_id
        WHERE s.event_id = $1 AND s.status = 'Pending'`, [id]
     );
@@ -197,7 +197,7 @@ router.post('/:id/run-lottery', requireAdmin, async (req, res) => {
     // independently random relative order.
     const shuffled = pending
       .sort(() => Math.random() - 0.5)
-      .map(r => ({ signup_id: r.signup_id, priority: !!r.is_exec_team }));
+      .map(r => ({ signup_id: r.signup_id, priority: !!(r.is_admin || r.is_exec_team) }));
     const capacity = parseInt(event.capacity) || 60;
 
     // Use shared logic to assign ranks and statuses
@@ -219,15 +219,15 @@ router.post('/:id/run-lottery', requireAdmin, async (req, res) => {
 
     await client.query('COMMIT');
     await audit(req.member.email, 'RunLottery', 'events', id, null,
-      { invited: inviteCount, waitlist: waitlistCount, execPriorityInvited: priorityCount,
-        capacityExceededByExec: priorityCount > capacity ? priorityCount - capacity : 0 });
+      { invited: inviteCount, waitlist: waitlistCount, priorityInvited: priorityCount,
+        capacityExceededByPriority: priorityCount > capacity ? priorityCount - capacity : 0 });
 
     return res.json({
-      ok: true, invited: inviteCount, waitlist: waitlistCount, execPriorityInvited: priorityCount,
-      // Only set when Exec Team entrants alone outnumbered capacity - the
+      ok: true, invited: inviteCount, waitlist: waitlistCount, priorityInvited: priorityCount,
+      // Only set when Admin/Exec entrants alone outnumbered capacity - the
       // admin UI can use this to call out the unusual case instead of it
       // passing silently in a plain invited/waitlist count.
-      capacityExceededByExec: priorityCount > capacity ? priorityCount - capacity : 0,
+      capacityExceededByPriority: priorityCount > capacity ? priorityCount - capacity : 0,
     });
   } catch (err) {
     await client.query('ROLLBACK');

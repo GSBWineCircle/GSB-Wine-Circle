@@ -175,7 +175,7 @@ describe('assignLotteryResults — Invited/Waitlist split at capacity boundary',
 
 // ─── assignLotteryResultsWithPriority ─────────────────────────────────────────
 
-describe('assignLotteryResultsWithPriority — Exec Team always wins', () => {
+describe('assignLotteryResultsWithPriority — Admin/Exec always win', () => {
   const p = (id) => ({ signup_id: id, priority: true });
   const n = (id) => ({ signup_id: id, priority: false });
   const statusOf = (results, id) => results.find(r => r.signup_id === id).newStatus;
