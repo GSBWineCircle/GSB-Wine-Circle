@@ -1442,6 +1442,8 @@ async function eventAction(action) {
             <div class="stat-card"><div class="stat-value" style="color:var(--info)">${r.invited ?? 0}</div><div class="stat-label">Invited</div></div>
             <div class="stat-card"><div class="stat-value" style="color:var(--warning)">${r.waitlist ?? 0}</div><div class="stat-label">Waitlist</div></div>
           </div>
+          ${r.execPriorityInvited ? `<p style="margin-top:12px;font-size:13px;">Includes <strong>${r.execPriorityInvited}</strong> Exec Team member(s), who always win a spot.</p>` : ''}
+          ${r.capacityExceededByExec ? `<p style="margin-top:8px;color:var(--danger);font-size:13px;">⚠ Exec Team entrants alone exceeded capacity, so ${r.capacityExceededByExec} more member(s) were invited than the event's stated capacity.</p>` : ''}
           <p style="margin-top:16px;color:var(--muted);font-size:13px;">The lottery has been run. Review the signups table, create a calendar invite, and click "Push Portal Updates" when you're ready for members to see the results.</p>
         `;
         openModal('modal-lottery');

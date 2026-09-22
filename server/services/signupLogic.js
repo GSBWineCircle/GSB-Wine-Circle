@@ -57,6 +57,38 @@ function assignLotteryResults(pendingSignups, capacity) {
 }
 
 /**
+ * Same as assignLotteryResults, except every priority=true entrant is
+ * guaranteed Invited (Exec Team always wins), and only the remaining
+ * capacity is drawn at random from everyone else. Priority entrants still
+ * get a random relative rank among themselves - they aren't ranked ahead
+ * by being first in the input, only by never landing on the waitlist.
+ *
+ * If priority entrants alone outnumber capacity, they are ALL still
+ * Invited (capacity is exceeded rather than waitlisting an Exec member) -
+ * "always wins" is treated as an absolute guarantee, not one bounded by
+ * capacity. With ~4 Exec Team members against typical 30-60 capacities
+ * this should not occur in practice, but is handled rather than assumed
+ * away.
+ *
+ * @param {Array<{signup_id: string, priority: boolean}>} pendingSignups — already shuffled or in desired order
+ * @param {number} capacity
+ * @returns {Array<{signup_id: string, lottery_rank: number, newStatus: 'Invited'|'Waitlist'}>}
+ */
+function assignLotteryResultsWithPriority(pendingSignups, capacity) {
+  const priority = pendingSignups.filter(s => s.priority);
+  const rest = pendingSignups.filter(s => !s.priority);
+  const remainingCapacity = Math.max(0, capacity - priority.length);
+
+  const priorityResults = priority.map((s, i) => ({
+    signup_id: s.signup_id, lottery_rank: i + 1, newStatus: 'Invited',
+  }));
+  const restResults = assignLotteryResults(rest, remainingCapacity)
+    .map(r => ({ ...r, lottery_rank: r.lottery_rank + priority.length }));
+
+  return [...priorityResults, ...restResults];
+}
+
+/**
  * Decide whether a decline should trigger auto-promotion from the waitlist.
  * Only an Invited member vacating their slot on an auto_invite_enabled event
  * opens a slot for promotion.
@@ -100,6 +132,7 @@ module.exports = {
   computeBalance,
   determineDeclineOutcome,
   assignLotteryResults,
+  assignLotteryResultsWithPriority,
   shouldAutoPromote,
   classifyFinalizeSignups,
   isMemberBlocked,

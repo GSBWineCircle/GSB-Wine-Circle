@@ -12,6 +12,7 @@ const {
   computeBalance,
   determineDeclineOutcome,
   assignLotteryResults,
+  assignLotteryResultsWithPriority,
   shouldAutoPromote,
   classifyFinalizeSignups,
   isMemberBlocked,
@@ -169,6 +170,72 @@ describe('assignLotteryResults — Invited/Waitlist split at capacity boundary',
     const results = assignLotteryResults(pending, 1);
     expect(results[0].signup_id).toBe('abc');
     expect(results[1].signup_id).toBe('xyz');
+  });
+});
+
+// ─── assignLotteryResultsWithPriority ─────────────────────────────────────────
+
+describe('assignLotteryResultsWithPriority — Exec Team always wins', () => {
+  const p = (id) => ({ signup_id: id, priority: true });
+  const n = (id) => ({ signup_id: id, priority: false });
+  const statusOf = (results, id) => results.find(r => r.signup_id === id).newStatus;
+
+  test('a priority entrant wins even when placed last in the input', () => {
+    const pending = [n('a'), n('b'), n('c'), p('exec')];
+    const results = assignLotteryResultsWithPriority(pending, 2);
+    expect(statusOf(results, 'exec')).toBe('Invited');
+    // Only 1 of 2 capacity slots is left for the 3 non-priority entrants.
+    const nonPriorityInvited = results.filter(r => r.newStatus === 'Invited' && r.signup_id !== 'exec');
+    expect(nonPriorityInvited).toHaveLength(1);
+  });
+
+  test('multiple priority entrants all win regardless of order', () => {
+    const pending = [n('a'), p('exec1'), n('b'), p('exec2'), n('c')];
+    const results = assignLotteryResultsWithPriority(pending, 1);
+    expect(statusOf(results, 'exec1')).toBe('Invited');
+    expect(statusOf(results, 'exec2')).toBe('Invited');
+    // Capacity of 1 was entirely consumed by the 2 priority entrants, so
+    // every non-priority entrant is waitlisted.
+    expect(statusOf(results, 'a')).toBe('Waitlist');
+    expect(statusOf(results, 'b')).toBe('Waitlist');
+    expect(statusOf(results, 'c')).toBe('Waitlist');
+  });
+
+  test('priority entrants exceeding capacity ALL still win (capacity is exceeded, not them)', () => {
+    const pending = [p('exec1'), p('exec2'), p('exec3'), n('a')];
+    const results = assignLotteryResultsWithPriority(pending, 2);
+    expect(statusOf(results, 'exec1')).toBe('Invited');
+    expect(statusOf(results, 'exec2')).toBe('Invited');
+    expect(statusOf(results, 'exec3')).toBe('Invited');
+    expect(statusOf(results, 'a')).toBe('Waitlist');
+    expect(results.filter(r => r.newStatus === 'Invited')).toHaveLength(3); // > capacity of 2
+  });
+
+  test('with no priority entrants, behaves exactly like assignLotteryResults', () => {
+    const pending = [n('a'), n('b'), n('c')];
+    const withPriority = assignLotteryResultsWithPriority(pending, 2)
+      .sort((x, y) => x.signup_id.localeCompare(y.signup_id));
+    const plain = assignLotteryResults(pending.map(({ signup_id }) => ({ signup_id })), 2)
+      .sort((x, y) => x.signup_id.localeCompare(y.signup_id));
+    expect(withPriority.map(r => ({ signup_id: r.signup_id, newStatus: r.newStatus })))
+      .toEqual(plain.map(r => ({ signup_id: r.signup_id, newStatus: r.newStatus })));
+  });
+
+  test('with everyone priority, everyone wins even at zero capacity', () => {
+    const results = assignLotteryResultsWithPriority([p('a'), p('b')], 0);
+    expect(statusOf(results, 'a')).toBe('Invited');
+    expect(statusOf(results, 'b')).toBe('Invited');
+  });
+
+  test('lottery_rank is unique 1..N across both groups combined', () => {
+    const pending = [n('a'), p('exec'), n('b'), n('c')];
+    const results = assignLotteryResultsWithPriority(pending, 2);
+    const ranks = results.map(r => r.lottery_rank).sort((x, y) => x - y);
+    expect(ranks).toEqual([1, 2, 3, 4]);
+  });
+
+  test('empty input returns empty output', () => {
+    expect(assignLotteryResultsWithPriority([], 10)).toHaveLength(0);
   });
 });
 

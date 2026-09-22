@@ -7,7 +7,7 @@ const { audit } = require('../services/audit');
 const { getSettings, emailFlakeBatch } = require('../services/email');
 const { recomputeBalance } = require('../services/fees');
 const {
-  assignLotteryResults,
+  assignLotteryResultsWithPriority,
   classifyFinalizeSignups,
 } = require('../services/signupLogic');
 
@@ -183,17 +183,25 @@ router.post('/:id/run-lottery', requireAdmin, async (req, res) => {
       return res.status(400).json({ error: 'Event must be Open or Closed to run lottery' });
     }
 
-    // Get all pending signups
+    // Get all pending signups, plus each entrant's Exec Team status - Exec
+    // Team members always win, so priority has to be decided here, not
+    // inferred later.
     const { rows: pending } = await client.query(
-      `SELECT signup_id FROM signups WHERE event_id = $1 AND status = 'Pending'`, [id]
+      `SELECT s.signup_id, m.is_exec_team
+       FROM signups s JOIN members m ON m.member_id = s.member_id
+       WHERE s.event_id = $1 AND s.status = 'Pending'`, [id]
     );
 
-    // Shuffle (Fisher-Yates via random sort)
-    const shuffled = pending.sort(() => Math.random() - 0.5);
+    // Shuffle (Fisher-Yates via random sort) before splitting by priority, so
+    // both the guaranteed group and the randomly-drawn group get an
+    // independently random relative order.
+    const shuffled = pending
+      .sort(() => Math.random() - 0.5)
+      .map(r => ({ signup_id: r.signup_id, priority: !!r.is_exec_team }));
     const capacity = parseInt(event.capacity) || 60;
 
     // Use shared logic to assign ranks and statuses
-    const results = assignLotteryResults(shuffled, capacity);
+    const results = assignLotteryResultsWithPriority(shuffled, capacity);
     for (const r of results) {
       await client.query(
         `UPDATE signups SET lottery_rank = $1, status = $2 WHERE signup_id = $3`,
@@ -203,6 +211,7 @@ router.post('/:id/run-lottery', requireAdmin, async (req, res) => {
 
     const inviteCount = results.filter(r => r.newStatus === 'Invited').length;
     const waitlistCount = results.filter(r => r.newStatus === 'Waitlist').length;
+    const priorityCount = shuffled.filter(s => s.priority).length;
 
     await client.query(
       `UPDATE events SET status = 'Lotteried', lottery_run_at = NOW() WHERE event_id = $1`, [id]
@@ -210,9 +219,16 @@ router.post('/:id/run-lottery', requireAdmin, async (req, res) => {
 
     await client.query('COMMIT');
     await audit(req.member.email, 'RunLottery', 'events', id, null,
-      { invited: inviteCount, waitlist: waitlistCount });
+      { invited: inviteCount, waitlist: waitlistCount, execPriorityInvited: priorityCount,
+        capacityExceededByExec: priorityCount > capacity ? priorityCount - capacity : 0 });
 
-    return res.json({ ok: true, invited: inviteCount, waitlist: waitlistCount });
+    return res.json({
+      ok: true, invited: inviteCount, waitlist: waitlistCount, execPriorityInvited: priorityCount,
+      // Only set when Exec Team entrants alone outnumbered capacity - the
+      // admin UI can use this to call out the unusual case instead of it
+      // passing silently in a plain invited/waitlist count.
+      capacityExceededByExec: priorityCount > capacity ? priorityCount - capacity : 0,
+    });
   } catch (err) {
     await client.query('ROLLBACK');
     console.error(err);
