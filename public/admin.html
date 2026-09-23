@@ -970,7 +970,7 @@
       </div>
       <div class="form-row">
         <div class="form-group">
-          <label for="ev-date">Event Date</label>
+          <label for="ev-date">Event Date (Pacific Time)</label>
           <input type="datetime-local" id="ev-date" />
         </div>
         <div class="form-group">
@@ -988,11 +988,11 @@
       </div>
       <div class="form-row">
         <div class="form-group">
-          <label for="ev-signup-opens">Signup Opens</label>
+          <label for="ev-signup-opens">Signup Opens (Pacific Time)</label>
           <input type="datetime-local" id="ev-signup-opens" />
         </div>
         <div class="form-group">
-          <label for="ev-signup-closes">Signup Closes</label>
+          <label for="ev-signup-closes">Signup Closes (Pacific Time)</label>
           <input type="datetime-local" id="ev-signup-closes" />
         </div>
       </div>
@@ -1658,9 +1658,9 @@ async function openEditEventById(eventId, e) {
     document.getElementById('ev-description').value = ev.description || '';
     document.getElementById('ev-host-notes').value = ev.host_notes || '';
     document.getElementById('ev-dollar-value').value = ev.dollar_value ?? '';
-    document.getElementById('ev-date').value = ev.event_date ? toLocalDateTime(ev.event_date) : '';
-    document.getElementById('ev-signup-opens').value = ev.signup_opens_at ? toLocalDateTime(ev.signup_opens_at) : '';
-    document.getElementById('ev-signup-closes').value = ev.signup_closes_at ? toLocalDateTime(ev.signup_closes_at) : '';
+    document.getElementById('ev-date').value = ev.event_date ? utcToPacificInput(ev.event_date) : '';
+    document.getElementById('ev-signup-opens').value = ev.signup_opens_at ? utcToPacificInput(ev.signup_opens_at) : '';
+    document.getElementById('ev-signup-closes').value = ev.signup_closes_at ? utcToPacificInput(ev.signup_closes_at) : '';
     openModal('modal-event');
   } catch (err) {
     toast('Failed to load event: ' + err.message, 'error');
@@ -1680,9 +1680,9 @@ async function saveEvent() {
     capacity:        parseInt(document.getElementById('ev-capacity').value) || 60,
     description:     document.getElementById('ev-description').value.trim(),
     host_notes:      document.getElementById('ev-host-notes').value.trim(),
-    event_date:      document.getElementById('ev-date').value || null,
-    signup_opens_at: document.getElementById('ev-signup-opens').value || null,
-    signup_closes_at:document.getElementById('ev-signup-closes').value || null,
+    event_date:      localInputToUTC(document.getElementById('ev-date').value),
+    signup_opens_at: localInputToUTC(document.getElementById('ev-signup-opens').value),
+    signup_closes_at:localInputToUTC(document.getElementById('ev-signup-closes').value),
     dollar_value:    document.getElementById('ev-dollar-value').value === '' ? null : parseFloat(document.getElementById('ev-dollar-value').value),
   };
   const btn = document.getElementById('modal-event-submit');
@@ -2758,19 +2758,66 @@ function esc(str) {
   if (str == null) return '';
   return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
+// All event times are set and shown in Pacific Time (PST/PDT), regardless of
+// the admin's own browser/OS timezone - the wall-clock time a Pacific-based
+// exec types into an event form should be exactly what members see, and
+// exactly what's stored, no matter where the page happens to be loaded from.
+const EVENT_TZ = 'America/Los_Angeles';
+
 function fmtDate(iso) {
   if (!iso) return '—';
-  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: EVENT_TZ });
 }
 function fmtDateTime(iso) {
   if (!iso) return '—';
-  return new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: EVENT_TZ });
 }
-function toLocalDateTime(iso) {
+
+// Offset (in minutes, e.g. 480 for PST / 420 for PDT) to ADD to a Pacific
+// wall-clock time to get UTC, for the instant `date` falls on. Computed via
+// Intl rather than hardcoded so DST transitions (Nov/Mar) are handled
+// automatically instead of drifting an hour off twice a year.
+function pacificOffsetMinutes(date) {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone: EVENT_TZ, hourCycle: 'h23',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  });
+  const parts = {};
+  dtf.formatToParts(date).forEach(p => { parts[p.type] = p.value; });
+  const asIfUTC = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
+  return Math.round((asIfUTC - date.getTime()) / 60000);
+}
+
+// Convert a <input type="datetime-local"> value (a naive "YYYY-MM-DDTHH:mm"
+// string with no timezone) into a real UTC instant, treating the typed
+// wall-clock time as Pacific Time - NOT the browser's local timezone and NOT
+// UTC (the mistake that let the DB silently reinterpret e.g. "6:00 PM
+// Pacific" as "6:00 PM UTC", shifting every saved time by 7-8 hours).
+function localInputToUTC(value) {
+  if (!value) return null;
+  const [datePart, timePart] = value.split('T');
+  const [y, m, d] = datePart.split('-').map(Number);
+  const [hh, mm] = (timePart || '00:00').split(':').map(Number);
+  const guessUTC = Date.UTC(y, m - 1, d, hh, mm);
+  const offset = pacificOffsetMinutes(new Date(guessUTC));
+  return new Date(guessUTC - offset * 60000).toISOString();
+}
+
+// Inverse of localInputToUTC: given a stored UTC ISO timestamp, produce the
+// "YYYY-MM-DDTHH:mm" string representing that instant's Pacific wall-clock
+// time, for populating a datetime-local field - independent of whatever
+// timezone the admin's own machine happens to be set to.
+function utcToPacificInput(iso) {
   if (!iso) return '';
-  const d = new Date(iso);
-  const pad = n => String(n).padStart(2,'0');
-  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone: EVENT_TZ, hourCycle: 'h23',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit',
+  });
+  const parts = {};
+  dtf.formatToParts(new Date(iso)).forEach(p => { parts[p.type] = p.value; });
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
 }
 
 /* ── Enter key for login ─────────────────────────────────────────────────── */
