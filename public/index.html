@@ -126,6 +126,35 @@
     .banner-contact { margin-top: 6px; font-size: 13px; color: var(--muted); }
     .banner-contact a { color: var(--burgundy); text-decoration: none; }
     .banner-contact a:hover { text-decoration: underline; }
+    /* Welcome screen: Instagram photo backdrop */
+    #view-login { position: relative; min-height: 100vh; padding: 1px 16px; overflow: hidden; }
+    .welcome-bg {
+      position: fixed; inset: 0; z-index: 0; display: grid; gap: 4px;
+      grid-template-columns: repeat(3, 1fr); grid-auto-rows: 1fr;
+      background: var(--burgundy);
+    }
+    @media (min-width: 700px)  { .welcome-bg { grid-template-columns: repeat(4, 1fr); } }
+    @media (min-width: 1100px) { .welcome-bg { grid-template-columns: repeat(6, 1fr); } }
+    .welcome-bg .tile {
+      background-size: cover; background-position: center;
+      animation: tile-fade 1.2s ease both;
+    }
+    @keyframes tile-fade { from { opacity: 0; transform: scale(1.06); } to { opacity: 1; transform: none; } }
+    .welcome-bg::after {
+      content: ""; position: absolute; inset: 0;
+      background: linear-gradient(rgba(58,14,28,0.72), rgba(58,14,28,0.82));
+    }
+    #view-login .login-box, #view-login .welcome-insta { position: relative; z-index: 1; }
+    #view-login .login-box { box-shadow: 0 12px 40px rgba(0,0,0,0.35); }
+    .welcome-insta {
+      max-width: 380px; margin: -36px auto 40px; text-align: center;
+      background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.3);
+      border-radius: 8px; padding: 12px 16px; backdrop-filter: blur(6px);
+      font-size: 14px; color: white;
+    }
+    .welcome-insta a { color: white; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+    .welcome-insta a:hover { color: #f6d9a8; }
+    @media (prefers-reduced-motion: reduce) { .welcome-bg .tile { animation: none; } }
     .login-box {
       max-width: 380px; margin: 60px auto;
       background: white; border: 1px solid var(--line);
@@ -227,6 +256,7 @@
 
 <!-- LOGIN VIEW -->
 <div id="view-login" class="view">
+  <div class="welcome-bg" id="welcome-bg" aria-hidden="true"></div>
   <div class="login-box">
     <h1 id="login-org-name">Wine Circle</h1>
     <p>Enter the email you used to sign up for wine circle and we'll send you a 6-digit login code.</p>
@@ -245,6 +275,10 @@
         <a href="#" onclick="backToEmail();return false;">Use a different email</a>
       </p>
     </div>
+  </div>
+  <div class="welcome-insta">
+    Not a member of GSB Wine Circle?
+    <a href="https://www.instagram.com/gsbwinecircle/" target="_blank" rel="noopener noreferrer">Click here to see what we've been up to!</a>
   </div>
 </div>
 
@@ -1064,6 +1098,23 @@
     var num = Number(n) || 0;
     return num % 1 === 0 ? String(num) : num.toFixed(2);
   }
+
+  // Welcome-screen backdrop. To use real Instagram photos, drop the image
+  // files into public/img/insta/ and list their filenames here.
+  var WELCOME_PHOTOS = [
+    'placeholder-1.svg','placeholder-2.svg','placeholder-3.svg','placeholder-4.svg','placeholder-5.svg',
+    'placeholder-6.svg','placeholder-7.svg','placeholder-8.svg','placeholder-9.svg'
+  ];
+  (function buildWelcomeBg() {
+    var bg = document.getElementById('welcome-bg');
+    if (!bg || !WELCOME_PHOTOS.length) return;
+    var html = '';
+    for (var i = 0; i < 24; i++) {
+      var f = WELCOME_PHOTOS[i % WELCOME_PHOTOS.length];
+      html += '<div class="tile" style="background-image:url(/img/insta/' + f + ');animation-delay:' + (i * 40) + 'ms"></div>';
+    }
+    bg.innerHTML = html;
+  })();
 
   function fmtDate(d) {
     if (!d) return '';
