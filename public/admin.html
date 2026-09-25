@@ -122,7 +122,7 @@
 
     /* Main content */
     .main-content {
-      margin-left: var(--sidebar-w); flex: 1; padding: 24px;
+      min-width: 0; margin-left: var(--sidebar-w); flex: 1; padding: 24px;
       min-height: calc(100vh - var(--header-h));
     }
 
@@ -156,6 +156,27 @@
     td { padding: 10px 12px; vertical-align: middle; }
     .td-actions { white-space: nowrap; display: flex; gap: 4px; }
 
+    /* Analytics overview: compact, capped width so it fits one screen */
+    .analytics-overview { max-width: 980px; margin-bottom: 20px; }
+    .an-heading { font-size: 15px; color: var(--wine); margin: 0 0 8px; }
+    .ov-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 10px; }
+    .ov-cards .stat-card { padding: 8px 6px; }
+    .ov-cards .stat-value { font-size: 20px; }
+    .ov-cards .stat-label { font-size: 11px; margin-top: 2px; }
+    .ov-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+    .ov-cols .card-body { padding: 10px 14px; }
+    .top-list { list-style: none; }
+    .top-list li { display: flex; align-items: center; gap: 10px; padding: 3px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+    .top-list li:last-child { border-bottom: none; }
+    .top-list .rank { width: 20px; height: 20px; border-radius: 50%; background: var(--wine); color: #fff; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex: none; }
+    .top-list .nm { flex: 1; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .top-list .val { font-weight: 700; color: var(--wine); }
+    .top-empty { color: var(--muted); font-size: 13px; padding: 6px 0; }
+    .ov-events-wrap { overflow: auto; max-height: 170px; }
+    .ov-events-wrap thead th { position: sticky; top: 0; z-index: 1; }
+    .ov-events-wrap td, .ov-events-wrap th { padding: 6px 10px; font-size: 12px; }
+    .ov-events-wrap td:not(:first-child), .ov-events-wrap th:not(:first-child) { text-align: right; white-space: nowrap; }
+
     /* Column resizing (Chromium supports resize on table cells; other browsers
        just ignore it and the column stays fixed — a harmless no-op there). */
     th.col-resizable { resize: horizontal; overflow: auto; min-width: 60px; }
@@ -164,10 +185,6 @@
     th.col-sortable { cursor: pointer; user-select: none; }
     th.col-sortable:hover { color: var(--wine); }
     th.col-sortable .sort-arrow { margin-left: 3px; opacity: .6; }
-
-    /* Visual break between individual records and per-column totals */
-    #analytics-table tfoot td { background: var(--bg); }
-    #analytics-table tfoot tr:first-child td { border-top: 3px solid var(--wine); padding-top: 12px; }
 
     /* ── Badges ───────────────────────────────────────────────────────────── */
     .badge {
@@ -327,6 +344,128 @@
     .tab-panel { display: none; }
     .tab-panel.active { display: block; }
     .fee-balance-positive { color: var(--danger); font-weight: 700; }
+
+    /* ── Mobile ───────────────────────────────────────────────────────────── */
+    @media (max-width: 768px) {
+      :root { --header-h: 52px; --nav-h: 46px; }
+      body { font-size: 15px; }
+      /* 16px inputs stop iOS Safari zooming the page on focus */
+      input, select, textarea { font-size: 16px; padding: 10px 12px; }
+      button:not(.btn-sm):not(.btn-icon):not(.modal-close):not(.btn-logout) { min-height: 42px; }
+      .btn-sm { padding: 8px 12px; font-size: 13px; }
+
+      .app-header { padding: 0 12px; gap: 8px; }
+      .app-header h1 { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .app-header .user-info { display: none; }
+      .app-header .btn-logout { padding: 6px 10px; }
+
+      /* Sidebar becomes a horizontally scrolling tab strip under the header */
+      .sidebar {
+        top: var(--header-h); left: 0; right: 0; bottom: auto; width: auto; height: var(--nav-h);
+        border-right: none; border-bottom: 1px solid var(--border);
+        overflow-x: auto; overflow-y: hidden; z-index: 90; -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+      }
+      .sidebar::-webkit-scrollbar { display: none; }
+      .sidebar nav { display: flex; padding: 0; height: 100%; width: max-content; min-width: 100%; }
+      .nav-divider { display: none; }
+      .nav-item {
+        padding: 0 14px; height: 100%; white-space: nowrap; flex: none; gap: 6px;
+        border-left: none; border-bottom: 3px solid transparent;
+      }
+      .nav-item.active { border-left-color: transparent; border-bottom-color: var(--wine); }
+      .main-content { min-width: 0; margin-left: 0; margin-top: var(--nav-h); padding: 14px 12px 80px; min-height: calc(100vh - var(--header-h) - var(--nav-h)); }
+
+      .page-header { flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+      .page-header h2 { font-size: 18px; min-width: 0; }
+      .page-header .actions { flex-wrap: wrap; width: 100%; }
+      .page-header .actions button { flex: 1 1 auto; }
+
+      .toolbar { gap: 8px; }
+      .toolbar input[type=search], .toolbar select, .toolbar input { max-width: none; flex: 1 1 140px; }
+      .search-select-wrap { max-width: none; }
+      .toolbar .spacer { display: none; }
+
+      .stat-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+      .stat-card { padding: 12px 8px; }
+      .stat-card .stat-value { font-size: 22px; }
+      .event-meta { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+      .meta-item { padding: 10px; }
+      .meta-item .meta-value { font-size: 14px; word-break: break-word; }
+
+      .action-bar { gap: 12px; padding: 12px; }
+      .action-group { width: 100%; padding-right: 0; border-right: none; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+      .action-group:last-child { border-bottom: none; padding-bottom: 0; }
+      .action-group-buttons button { flex: 1 1 auto; }
+
+      .tab-bar { overflow-x: auto; white-space: nowrap; scrollbar-width: none; }
+      .tab-item { padding: 10px 16px; flex: none; }
+
+      .members-summary .summary-title { width: 100%; }
+      .members-summary .summary-note { margin-left: 0; }
+      .pagination { flex-wrap: wrap; }
+
+      /* Tables turn into stacked cards; wide matrices (.nostack) keep scrolling */
+      .card.table-wrap, .table-wrap { border-radius: var(--radius); }
+      table.stack, table.stack tbody, table.stack tr, table.stack td { display: block; width: 100%; }
+      table.stack { background: transparent; }
+      table.stack thead { display: none; }
+      table.stack tbody tr {
+        background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+        margin-bottom: 10px; padding: 8px 12px; box-shadow: var(--shadow);
+      }
+      table.stack tbody tr:hover { background: var(--surface); }
+      table.stack td {
+        display: flex; justify-content: space-between; align-items: center; gap: 12px;
+        padding: 5px 0; text-align: right; word-break: break-word;
+      }
+      table.stack td::before {
+        content: attr(data-label); flex: none; max-width: 42%; text-align: left;
+        font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
+      }
+      table.stack td[data-label=""]::before, table.stack td:not([data-label])::before { display: none; }
+      table.stack td[colspan] { display: block; text-align: center; }
+      table.stack td[colspan]::before { display: none; }
+      table.stack tbody tr { position: relative; }
+      table.stack td.cell-empty { display: none; }
+      table.stack td.cell-title {
+        display: block; text-align: left; font-size: 16px; font-weight: 700;
+        padding: 2px 32px 8px 0; margin-bottom: 4px; border-bottom: 1px solid var(--border);
+      }
+      table.stack td.cell-title::before { display: none; }
+      table.stack td.cell-select { position: absolute; top: 10px; right: 10px; width: auto; padding: 0; z-index: 1; }
+      table.stack td.cell-actions { justify-content: flex-start; flex-wrap: wrap; padding-top: 10px; margin-top: 6px; border-top: 1px solid var(--border); }
+      table.stack td.td-actions { flex-wrap: wrap; justify-content: flex-end; padding-top: 8px; margin-top: 4px; border-top: 1px solid var(--border); }
+      table.stack td.td-actions::before { display: none; }
+      table.stack td input[type=checkbox] { width: 20px; height: 20px; }
+      /* Settings table: full-width inputs */
+      table.stack td input[type=text] { text-align: left; }
+
+      /* Modals become bottom sheets */
+      .modal-overlay { padding: 0; align-items: flex-end; }
+      .modal { max-width: 100% !important; max-height: 92vh; border-radius: 16px 16px 0 0; }
+      .modal-body { padding: 16px; }
+      .modal-header { padding: 14px 16px; position: sticky; top: 0; background: var(--surface); z-index: 1; }
+      .modal-footer { padding: 12px 16px; position: sticky; bottom: 0; background: var(--surface); flex-wrap: wrap; }
+      .modal-footer button { flex: 1 1 auto; }
+      .form-row { grid-template-columns: 1fr; gap: 0; }
+      .modal-close { font-size: 26px; padding: 0 8px; }
+
+      #toast-container { left: 12px; right: 12px; bottom: 12px; }
+      .toast { max-width: none; }
+
+      .login-card { padding: 28px 20px; }
+      .attendance-item { padding: 12px; }
+      .wp-grid { grid-template-columns: repeat(3, 1fr); gap: 6px; }
+
+      /* Analytics overview */
+      .ov-cards { grid-template-columns: repeat(2, 1fr); }
+      .ov-cards .stat-card { padding: 8px 6px; }
+      .ov-cards .stat-card .stat-value { font-size: 18px; }
+      .ov-cols { grid-template-columns: 1fr; }
+      .ov-events-wrap td:first-child, .ov-events-wrap th:first-child { position: sticky; left: 0; white-space: nowrap; background: var(--surface); z-index: 2; }
+      .ov-events-wrap thead th:first-child { background: var(--bg); z-index: 3; }
+    }
   </style>
 </head>
 <body>
@@ -701,17 +840,17 @@
             <option value="">All Years</option>
           </select>
         </div>
+        <div class="analytics-overview" id="analytics-overview"></div>
+
+        <h3 class="an-heading">Members</h3>
         <div class="card table-wrap" style="overflow:auto; max-height:70vh;">
-          <table id="analytics-table" style="font-size:12px;">
+          <table id="analytics-table" class="nostack" style="font-size:12px;">
             <thead id="analytics-thead"></thead>
             <tbody id="analytics-tbody">
               <tr class="loading-row"><td><span class="spinner"></span> Loading…</td></tr>
             </tbody>
-            <tfoot id="analytics-tfoot"></tfoot>
           </table>
         </div>
-
-        <div class="stat-grid" id="analytics-averages" style="margin-top:20px;"></div>
 
         <div class="card" style="margin-top:20px;">
           <div class="card-body" style="padding-bottom:0;">
@@ -730,7 +869,7 @@
             <div id="member-history-summary" class="event-meta"></div>
           </div>
           <div class="table-wrap" style="overflow:auto; max-height:50vh;">
-            <table id="member-history-table" style="font-size:12px;">
+            <table id="member-history-table" class="nostack" style="font-size:12px;">
               <thead>
                 <tr><th>Event</th><th>Date</th><th>Status</th><th>Dollar Value</th></tr>
               </thead>
@@ -2510,7 +2649,7 @@ async function saveSetting(key) {
 }
 
 /* ── Analytics (Exec Team only) ─────────────────────────────────────────── */
-let analyticsFixedCols = 7; // Member, Email, Affiliation, Year, Applied, Attended, Total Value
+let analyticsFixedCols = 8; // Member, Email, Affiliation, Year, Applied, Attended, Flaked, Total Value
 let analyticsData = null; // cached matrix payload, reused by renderMemberHistory()
 let analyticsSortKey = null;
 let analyticsSortDir = -1; // -1 = descending ("most" first), 1 = ascending
@@ -2519,7 +2658,6 @@ async function loadAnalytics() {
   const tbody = document.getElementById('analytics-tbody');
   tbody.innerHTML = '<tr class="loading-row"><td><span class="spinner"></span> Loading…</td></tr>';
   document.getElementById('analytics-thead').innerHTML = '';
-  document.getElementById('analytics-tfoot').innerHTML = '';
 
   const year = document.getElementById('analytics-year-filter').value;
   try {
@@ -2553,17 +2691,18 @@ async function loadAnalytics() {
 
 function computeMemberAggregate(memberId, events, cells) {
   const memberCells = cells[memberId] || {};
-  let applied = 0, attended = 0, totalValue = 0;
+  let applied = 0, attended = 0, flaked = 0, totalValue = 0;
   events.forEach(e => {
     const status = memberCells[e.event_id];
     if (!status) return;
     applied++;
+    if (status === 'Flaked') flaked++;
     if (status === 'Attended') {
       attended++;
       if (e.dollar_value != null) totalValue += parseFloat(e.dollar_value);
     }
   });
-  return { applied, attended, totalValue };
+  return { applied, attended, flaked, totalValue };
 }
 
 function sortAnalytics(key) {
@@ -2580,7 +2719,6 @@ function sortArrow(key) {
 function renderAnalyticsTable() {
   const thead = document.getElementById('analytics-thead');
   const tbody = document.getElementById('analytics-tbody');
-  const tfoot = document.getElementById('analytics-tfoot');
   if (!analyticsData) return;
   const { members, events, cells, totals } = analyticsData;
 
@@ -2588,8 +2726,7 @@ function renderAnalyticsTable() {
   if (!members.length || !events.length) {
     thead.innerHTML = '';
     tbody.innerHTML = `<tr class="loading-row"><td colspan="${colCount}" style="color:var(--muted)">No data yet.</td></tr>`;
-    tfoot.innerHTML = '';
-    document.getElementById('analytics-averages').innerHTML = '';
+    document.getElementById('analytics-overview').innerHTML = '';
     return;
   }
 
@@ -2598,6 +2735,7 @@ function renderAnalyticsTable() {
     name:     (a, b) => a.member.full_name.localeCompare(b.member.full_name),
     applied:  (a, b) => a.agg.applied - b.agg.applied,
     attended: (a, b) => a.agg.attended - b.agg.attended,
+    flaked:   (a, b) => a.agg.flaked - b.agg.flaked,
     value:    (a, b) => a.agg.totalValue - b.agg.totalValue,
   };
   if (analyticsSortKey && sortFns[analyticsSortKey]) {
@@ -2611,6 +2749,7 @@ function renderAnalyticsTable() {
       <th class="col-resizable">Year</th>
       <th class="col-resizable col-sortable" onclick="sortAnalytics('applied')">Applied${sortArrow('applied')}</th>
       <th class="col-resizable col-sortable" onclick="sortAnalytics('attended')">Attended${sortArrow('attended')}</th>
+      <th class="col-resizable col-sortable" onclick="sortAnalytics('flaked')">Flaked${sortArrow('flaked')}</th>
       <th class="col-resizable col-sortable" onclick="sortAnalytics('value')">Total Value${sortArrow('value')}</th>
       ${events.map(e => `<th class="col-resizable" style="white-space:nowrap;">${esc(e.name)}</th>`).join('')}
     </tr>`;
@@ -2623,6 +2762,7 @@ function renderAnalyticsTable() {
       <td>${esc(m.school_year) || '—'}</td>
       <td>${agg.applied}</td>
       <td>${agg.attended}</td>
+      <td${agg.flaked ? ' style="color:var(--danger);font-weight:600;"' : ''}>${agg.flaked}</td>
       <td>$${agg.totalValue.toFixed(2)}</td>
       ${events.map(e => {
         const status = cells[m.member_id]?.[e.event_id];
@@ -2631,41 +2771,68 @@ function renderAnalyticsTable() {
     </tr>
   `).join('');
 
-  const pct = v => Math.round(v * 100) + '%';
-  const summaryRow = (label, fn) => `
-    <tr>
-      <td colspan="${analyticsFixedCols}" style="font-weight:700;">${esc(label)}</td>
-      ${events.map(e => `<td style="font-weight:700;">${fn(totals[e.event_id])}</td>`).join('')}
-    </tr>`;
-  tfoot.innerHTML =
-    summaryRow('Applied', t => t.applied) +
-    summaryRow('Dropped', t => t.dropped) +
-    summaryRow('Flaked', t => t.flaked) +
-    summaryRow('Attended', t => t.attended) +
-    summaryRow('% Attended', t => pct(t.pctAttended)) +
-    summaryRow('# Given a Chance', t => t.givenChance) +
-    summaryRow('% Given a Chance', t => pct(t.pctGivenChance)) +
-    summaryRow('% Attended of Given a Chance', t => pct(t.pctAttendedOfGivenChance)) +
-    summaryRow('Dollar Value', t => t.dollarValue != null ? '$' + t.dollarValue.toFixed(2) : '—') +
-    summaryRow('Total Dollar Value', t => '$' + t.totalDollarValue.toFixed(2));
-
-  renderAnalyticsAverages(rows.map(r => r.agg));
+  renderAnalyticsOverview(rows, events, totals);
 }
 
-function renderAnalyticsAverages(aggs) {
-  const el = document.getElementById('analytics-averages');
-  if (!aggs.length) { el.innerHTML = ''; return; }
-  const avg = arr => arr.reduce((a, b) => a + b, 0) / arr.length;
-  const avgApplied = avg(aggs.map(a => a.applied));
-  const avgAttended = avg(aggs.map(a => a.attended));
-  const avgValue = avg(aggs.map(a => a.totalValue));
-  const avgPctAttended = avgApplied ? avgAttended / avgApplied : 0;
+// Top N members by a metric (highest first), skipping zeros; ties broken by
+// the secondary metric, then name, so the order is stable.
+function topMembers(rows, key, tieKey, n = 5) {
+  return rows
+    .filter(r => r.agg[key] > 0)
+    .sort((a, b) => (b.agg[key] - a.agg[key]) || (b.agg[tieKey] - a.agg[tieKey]) || a.member.full_name.localeCompare(b.member.full_name))
+    .slice(0, n);
+}
+
+function renderAnalyticsOverview(rows, events, totals) {
+  const el = document.getElementById('analytics-overview');
+  if (!rows.length) { el.innerHTML = ''; return; }
+  const aggs = rows.map(r => r.agg);
+  const sum = k => aggs.reduce((a, g) => a + g[k], 0);
+  const avg = k => sum(k) / aggs.length;
+  const avgPct = avg('applied') ? avg('attended') / avg('applied') : 0;
+  const pct = v => Math.round(v * 100) + '%';
+  const card = (v, l) => `<div class="stat-card"><div class="stat-value">${v}</div><div class="stat-label">${l}</div></div>`;
+
+  const list = (items, fmt) => items.length
+    ? `<ol class="top-list">${items.map((r, i) => `<li><span class="rank">${i + 1}</span><span class="nm" title="${esc(r.member.email)}">${esc(r.member.full_name)}</span><span class="val">${fmt(r.agg)}</span></li>`).join('')}</ol>`
+    : '<div class="top-empty">No data yet.</div>';
+
+  const eventRows = events.map(e => {
+    const t = totals[e.event_id];
+    return `<tr><td style="font-weight:600;">${esc(e.name)}</td>
+      <td>${t.applied}</td><td>${t.dropped}</td><td>${t.flaked}</td><td>${t.attended}</td><td>${pct(t.pctAttended)}</td>
+      <td>${t.givenChance}</td><td>${pct(t.pctAttendedOfGivenChance)}</td>
+      <td>${t.dollarValue != null ? '$' + t.dollarValue.toFixed(2) : '—'}</td><td>$${t.totalDollarValue.toFixed(2)}</td></tr>`;
+  }).join('');
+
   el.innerHTML = `
-    <div class="stat-card"><div class="stat-value">${avgApplied.toFixed(1)}</div><div class="stat-label">Avg Applied / Member</div></div>
-    <div class="stat-card"><div class="stat-value">${avgAttended.toFixed(1)}</div><div class="stat-label">Avg Attended / Member</div></div>
-    <div class="stat-card"><div class="stat-value">${Math.round(avgPctAttended * 100)}%</div><div class="stat-label">Avg % Attended</div></div>
-    <div class="stat-card"><div class="stat-value">$${avgValue.toFixed(2)}</div><div class="stat-label">Avg Dollar Value / Member</div></div>
-  `;
+    <div class="ov-cards">
+      ${card(sum('attended'), 'Total Attended')}
+      ${card(sum('flaked'), 'Total Flaked')}
+      ${card('$' + sum('totalValue').toFixed(2), 'Total Value Captured')}
+      ${card(aggs.length, 'Members')}
+      ${card(avg('applied').toFixed(1), 'Avg Applied / Member')}
+      ${card(avg('attended').toFixed(1), 'Avg Attended / Member')}
+      ${card(pct(avgPct), 'Avg % Attended')}
+      ${card('$' + avg('totalValue').toFixed(2), 'Avg Value / Member')}
+    </div>
+    <div class="ov-cols">
+      <div class="card card-body">
+        <h3 class="an-heading">Top 5 · Events Attended</h3>
+        ${list(topMembers(rows, 'attended', 'totalValue'), g => g.attended + (g.attended === 1 ? ' event' : ' events'))}
+      </div>
+      <div class="card card-body">
+        <h3 class="an-heading">Top 5 · Value Captured</h3>
+        ${list(topMembers(rows, 'totalValue', 'attended'), g => '$' + g.totalValue.toFixed(2))}
+      </div>
+    </div>
+    <h3 class="an-heading">By Event</h3>
+    <div class="card ov-events-wrap">
+      <table class="nostack">
+        <thead><tr><th>Event</th><th>Applied</th><th>Dropped</th><th>Flaked</th><th>Attended</th><th>% Att.</th><th>Given Chance</th><th>% Att. of GC</th><th>Value</th><th>Total Value</th></tr></thead>
+        <tbody>${eventRows}</tbody>
+      </table>
+    </div>`;
 }
 
 function renderMemberHistory() {
@@ -2923,6 +3090,36 @@ function utcToPacificInput(iso) {
   dtf.formatToParts(new Date(iso)).forEach(p => { parts[p.type] = p.value; });
   return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
 }
+
+/* ── Mobile: label table cells so tables can render as stacked cards ─────── */
+function labelStackTables() {
+  document.querySelectorAll('.main-content table:not(.nostack)').forEach(t => {
+    t.classList.add('stack');
+    const heads = [...t.querySelectorAll('thead th')].map(th => th.textContent.trim());
+    t.querySelectorAll('tbody tr').forEach(tr => {
+      if (tr.dataset.stackDone || [...tr.children].some(td => td.colSpan > 1)) return;
+      tr.dataset.stackDone = '1';
+      let titled = false;
+      [...tr.children].forEach((td, i) => {
+        const head = heads[i] || '';
+        const hasControl = !!td.querySelector('input[type=checkbox]');
+        const isActions = /^actions?$/i.test(head) || td.classList.contains('td-actions');
+        td.setAttribute('data-label', isActions || hasControl ? '' : head);
+        if (hasControl) td.classList.add('cell-select');
+        else if (isActions) td.classList.add('cell-actions');
+        else if (!td.children.length && !td.textContent.trim()) td.classList.add('cell-empty');
+        else if (!titled) { td.classList.add('cell-title'); titled = true; }
+      });
+    });
+  });
+}
+(function watchTables() {
+  let queued = false;
+  const run = () => { queued = false; labelStackTables(); };
+  new MutationObserver(() => { if (!queued) { queued = true; requestAnimationFrame(run); } })
+    .observe(document.querySelector('.main-content'), { childList: true, subtree: true });
+  labelStackTables();
+})();
 
 /* ── Enter key for login ─────────────────────────────────────────────────── */
 document.getElementById('login-email').addEventListener('keydown', e => { if (e.key === 'Enter') sendCode(); });
