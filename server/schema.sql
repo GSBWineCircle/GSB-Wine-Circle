@@ -240,3 +240,32 @@ BEGIN
   END LOOP;
 END;
 $$;
+
+-- ── Instagram / welcome-screen photos ────────────────────────────────────────
+-- Photos an admin has chosen to showcase on the login (welcome) screen. The
+-- image bytes are copied in at selection time because Instagram's CDN URLs
+-- expire within days, so hot-linking them would leave broken tiles.
+CREATE TABLE IF NOT EXISTS welcome_photos (
+  photo_id     TEXT PRIMARY KEY,               -- Instagram media id
+  permalink    TEXT NOT NULL DEFAULT '',
+  caption      TEXT NOT NULL DEFAULT '',
+  content_type TEXT NOT NULL,
+  image        BYTEA NOT NULL,
+  position     INTEGER NOT NULL DEFAULT 0,
+  added_by     TEXT NOT NULL DEFAULT '',
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_welcome_photos_position ON welcome_photos (position);
+
+-- Single-row store for the Instagram long-lived access token once it has been
+-- refreshed (Instagram tokens last 60 days and must be renewed, so the current
+-- value can't live only in an environment variable). seeded_from records which
+-- INSTAGRAM_ACCESS_TOKEN env value the row descends from; if the env var is
+-- replaced with a new token, the stale row is ignored.
+CREATE TABLE IF NOT EXISTS instagram_credentials (
+  id           INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  access_token TEXT NOT NULL,
+  seeded_from  TEXT NOT NULL DEFAULT '',
+  expires_at   TIMESTAMPTZ,
+  refreshed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

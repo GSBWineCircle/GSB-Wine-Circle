@@ -19,6 +19,7 @@ const settingsRoutes = require('./routes/settings');
 const auditRoutes = require('./routes/audit');
 const devRoutes = require('./routes/dev');
 const analyticsRoutes = require('./routes/analytics');
+const instagramRoutes = require('./routes/instagram');
 
 const path = require('path');
 
@@ -46,7 +47,12 @@ app.use(helmet({
       scriptSrcAttr: ["'unsafe-inline'"],
       styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
       fontSrc: ["'self'", 'https://fonts.gstatic.com'],
-      imgSrc: ["'self'", 'data:'],
+      // Instagram's CDN, so the admin photo picker can show thumbnails
+      // straight from Instagram. (Welcome-screen photos are served from our
+      // own origin.) A local mock origin is added only when testing.
+      imgSrc: ["'self'", 'data:', 'https://*.cdninstagram.com', 'https://*.fbcdn.net',
+        ...(process.env.INSTAGRAM_API_BASE && process.env.NODE_ENV !== 'production'
+          ? [new URL(process.env.INSTAGRAM_API_BASE).origin] : [])],
       connectSrc: ["'self'"],
       objectSrc: ["'none'"],
       baseUri: ["'self'"],
@@ -130,6 +136,8 @@ app.use('/api/settings', settingsRoutes);
 app.use('/api/audit', auditRoutes);
 app.use('/api/dev', devRoutes);
 app.use('/api/analytics', analyticsRoutes);
+app.use('/api/welcome-photos', instagramRoutes.publicRouter);
+app.use('/api/instagram', instagramRoutes.adminRouter);
 
 // ── Static frontend ───────────────────────────────────────────────────────────
 const publicDir = path.join(__dirname, '..', 'public');
@@ -171,6 +179,19 @@ cron.schedule('0 3 * * *', async () => {
     console.log('Pruned expired auth codes and sessions');
   } catch (err) {
     console.error('Prune job error:', err.message);
+  }
+});
+
+// Renew the Instagram token weekly (60-day lifetime; refreshable once it is
+// more than a day old), so the welcome-screen integration never lapses.
+cron.schedule('0 4 * * 1', async () => {
+  const instagram = require('./services/instagram');
+  try {
+    if (!(await instagram.isConfigured())) return;
+    const r = await instagram.refreshToken();
+    if (r.refreshed) console.log('Instagram token refreshed');
+  } catch (err) {
+    console.error('Instagram token refresh failed:', err.message);
   }
 });
 

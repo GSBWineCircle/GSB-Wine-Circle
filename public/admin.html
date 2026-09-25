@@ -98,6 +98,18 @@
       position: fixed; top: var(--header-h); bottom: 0; overflow-y: auto;
     }
     .sidebar nav { padding: 12px 0; }
+    .wp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+    .wp-tile { position: relative; aspect-ratio: 1; border-radius: 6px; overflow: hidden; cursor: pointer;
+      border: 3px solid transparent; background: #e9e1d3; }
+    .wp-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .wp-tile.selected { border-color: var(--wine); }
+    .wp-tile.disabled { cursor: not-allowed; opacity: 0.45; }
+    .wp-tile .wp-badge { position: absolute; top: 6px; right: 6px; min-width: 24px; height: 24px; padding: 0 6px;
+      border-radius: 12px; background: var(--wine); color: #fff; font-size: 12px; font-weight: 700;
+      display: none; align-items: center; justify-content: center; }
+    .wp-tile.selected .wp-badge { display: flex; }
+    .wp-tile .wp-tag { position: absolute; left: 6px; bottom: 6px; font-size: 11px; color: #fff;
+      background: rgba(0,0,0,0.6); padding: 1px 6px; border-radius: 3px; }
     .nav-item {
       display: flex; align-items: center; gap: 10px; padding: 10px 20px;
       color: var(--text); font-size: 13px; font-weight: 500; cursor: pointer;
@@ -383,6 +395,9 @@
         </div>
         <div class="nav-item" data-page="email-log" onclick="nav('email-log')">
           <span class="nav-icon">📧</span> Email Log
+        </div>
+        <div class="nav-item" data-page="welcome-photos" onclick="nav('welcome-photos')">
+          <span class="nav-icon">📸</span> Welcome Photos
         </div>
         <hr class="nav-divider" />
         <div class="nav-item" data-page="settings" id="nav-settings" style="display:none;" onclick="nav('settings')">
@@ -790,6 +805,21 @@
       </div>
 
       <!-- ── Settings Page ───────────────────────────────────────────────── -->
+      <div id="page-welcome-photos" class="page">
+        <div class="page-header">
+          <h2>Welcome Photos</h2>
+          <div class="actions">
+            <span id="wp-count" class="text-muted" style="font-size:13px;margin-right:12px;"></span>
+            <button class="btn-primary" id="wp-save" onclick="saveWelcomePhotos()" disabled>Save selection</button>
+          </div>
+        </div>
+        <p class="text-muted" style="font-size:13px;margin:-4px 0 16px;">
+          Choose photos from our Instagram to show behind the member login screen. Click a photo to
+          select it; numbers show the order. Selected photos are copied to this site when you save.
+        </p>
+        <div id="wp-body"></div>
+      </div>
+
       <div id="page-settings" class="page">
         <div class="page-header"><h2>Settings</h2></div>
         <div id="settings-body"></div>
@@ -1220,7 +1250,81 @@ function nav(page) {
   if (page === 'audit')      { auditPage = 1; loadAudit(); }
   if (page === 'email-log')  { emailLogPage = 1; loadEmailLog(); }
   if (page === 'settings')   loadSettings();
+  if (page === 'welcome-photos') loadWelcomePhotos();
   if (page === 'analytics')  loadAnalytics();
+}
+
+/* ── Welcome Photos (Instagram) ──────────────────────────────────────────── */
+const WP_MAX = 24;
+let wpSelected = [];   // ordered media ids
+let wpSaved = '';      // JSON of last-saved selection, to detect changes
+
+async function loadWelcomePhotos() {
+  const body = document.getElementById('wp-body');
+  body.innerHTML = '<div class="text-muted"><span class="spinner"></span> Loading from Instagram…</div>';
+  try {
+    const r = await api('GET', '/instagram/media');
+    if (!r.connected) {
+      body.innerHTML = `<div class="card card-body">
+        <strong>Instagram isn't connected yet.</strong>
+        <p class="text-muted" style="font-size:13px;margin:8px 0 0;">
+          Set the <span class="monospace">INSTAGRAM_ACCESS_TOKEN</span> environment variable on the server
+          (a long-lived token from the Meta developer dashboard for @gsb_winecircle), then reload this page.
+        </p></div>`;
+      document.getElementById('wp-save').disabled = true;
+      return;
+    }
+    wpSelected = r.selected.slice();
+    wpSaved = JSON.stringify(wpSelected);
+    const exp = r.tokenExpiresAt ? ` · token renews automatically (valid until ${fmtDate(r.tokenExpiresAt)})` : '';
+    body.innerHTML = `<p class="text-muted" style="font-size:12px;margin-bottom:10px;">Connected${r.username ? ' as @' + esc(r.username) : ''}${exp}</p>
+      <div class="wp-grid">${r.media.map(m => `
+        <div class="wp-tile ${m.selectable ? '' : 'disabled'}" data-id="${esc(m.id)}" data-selectable="${m.selectable}"
+             title="${esc(m.caption || '')}" onclick="toggleWelcomePhoto(this)">
+          ${m.thumb ? `<img src="${esc(m.thumb)}" loading="lazy" alt="">` : ''}
+          <span class="wp-badge"></span>
+          ${m.selectable ? '' : '<span class="wp-tag">video</span>'}
+        </div>`).join('')}</div>`;
+    refreshWelcomePhotoUI();
+  } catch (e) {
+    body.innerHTML = `<div class="text-danger">Error: ${esc(e.message)}</div>`;
+  }
+}
+
+function toggleWelcomePhoto(el) {
+  if (el.dataset.selectable !== 'true') return;
+  const id = el.dataset.id;
+  const i = wpSelected.indexOf(id);
+  if (i >= 0) wpSelected.splice(i, 1);
+  else if (wpSelected.length >= WP_MAX) return toast(`You can choose up to ${WP_MAX} photos.`, 'error');
+  else wpSelected.push(id);
+  refreshWelcomePhotoUI();
+}
+
+function refreshWelcomePhotoUI() {
+  document.querySelectorAll('.wp-tile').forEach(t => {
+    const i = wpSelected.indexOf(t.dataset.id);
+    t.classList.toggle('selected', i >= 0);
+    t.querySelector('.wp-badge').textContent = i >= 0 ? i + 1 : '';
+  });
+  document.getElementById('wp-count').textContent = `${wpSelected.length} of ${WP_MAX} selected`;
+  document.getElementById('wp-save').disabled = JSON.stringify(wpSelected) === wpSaved;
+}
+
+async function saveWelcomePhotos() {
+  const btn = document.getElementById('wp-save');
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+  try {
+    await api('PUT', '/instagram/selection', { media_ids: wpSelected });
+    wpSaved = JSON.stringify(wpSelected);
+    toast('Welcome screen photos updated', 'success');
+  } catch (e) {
+    toast('Error: ' + e.message, 'error');
+  } finally {
+    btn.textContent = 'Save selection';
+    refreshWelcomePhotoUI();
+  }
 }
 
 /* ── Tabs ────────────────────────────────────────────────────────────────── */

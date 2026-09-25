@@ -19,7 +19,7 @@ non-trivial change — see [`ARCHITECTURE.md`](ARCHITECTURE.md).
 - **`server/`** — Express API.
   - `index.js` — app setup, security middleware, route mounting, cron jobs.
   - `routes/` — one file per resource (`auth`, `members`, `events`, `signups`,
-    `fees`, `email`, `settings`, `audit`, `analytics`, `dev`).
+    `fees`, `email`, `settings`, `audit`, `analytics`, `instagram`, `dev`).
   - `services/` — shared business logic (`email.js`, `fees.js`,
     `signupLogic.js`, `audit.js`, `analytics.js`) used across routes.
   - `middleware/auth.js` — session resolution (`requireAuth` /

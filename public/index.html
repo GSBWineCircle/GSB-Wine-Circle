@@ -142,7 +142,7 @@
     @keyframes tile-fade { from { opacity: 0; transform: scale(1.06); } to { opacity: 1; transform: none; } }
     .welcome-bg::after {
       content: ""; position: absolute; inset: 0;
-      background: linear-gradient(rgba(58,14,28,0.72), rgba(58,14,28,0.82));
+      background: linear-gradient(rgba(58,14,28,0.5), rgba(58,14,28,0.62));
     }
     #view-login .login-box, #view-login .welcome-insta { position: relative; z-index: 1; }
     #view-login .login-box { box-shadow: 0 12px 40px rgba(0,0,0,0.35); }
@@ -278,7 +278,7 @@
   </div>
   <div class="welcome-insta">
     Not a member of GSB Wine Circle?
-    <a href="https://www.instagram.com/gsbwinecircle/" target="_blank" rel="noopener noreferrer">Click here to see what we've been up to!</a>
+    <a href="https://www.instagram.com/gsb_winecircle/" target="_blank" rel="noopener noreferrer">Click here to see what we've been up to!</a>
   </div>
 </div>
 
@@ -1099,21 +1099,24 @@
     return num % 1 === 0 ? String(num) : num.toFixed(2);
   }
 
-  // Welcome-screen backdrop. To use real Instagram photos, drop the image
-  // files into public/img/insta/ and list their filenames here.
-  var WELCOME_PHOTOS = [
-    'placeholder-1.svg','placeholder-2.svg','placeholder-3.svg','placeholder-4.svg','placeholder-5.svg',
-    'placeholder-6.svg','placeholder-7.svg','placeholder-8.svg','placeholder-9.svg'
-  ];
+  // Welcome-screen backdrop: photos an admin picked from Instagram (Admin ->
+  // Welcome Photos). With none selected it stays plain burgundy.
   (function buildWelcomeBg() {
     var bg = document.getElementById('welcome-bg');
-    if (!bg || !WELCOME_PHOTOS.length) return;
-    var html = '';
-    for (var i = 0; i < 24; i++) {
-      var f = WELCOME_PHOTOS[i % WELCOME_PHOTOS.length];
-      html += '<div class="tile" style="background-image:url(/img/insta/' + f + ');animation-delay:' + (i * 40) + 'ms"></div>';
-    }
-    bg.innerHTML = html;
+    if (!bg) return;
+    fetch('/api/welcome-photos').then(function (r) { return r.ok ? r.json() : { photos: [] }; })
+      .then(function (d) {
+        var urls = (d.photos || []).map(function (p) { return p.url; });
+        if (!urls.length) return;
+        for (var i = urls.length - 1; i > 0; i--) {   // shuffle so repeats aren't a fixed pattern
+          var j = Math.floor(Math.random() * (i + 1)), t = urls[i]; urls[i] = urls[j]; urls[j] = t;
+        }
+        var html = '';
+        for (var k = 0; k < 24; k++) {
+          html += '<div class="tile" style="background-image:url(' + urls[k % urls.length] + ');animation-delay:' + (k * 40) + 'ms"></div>';
+        }
+        bg.innerHTML = html;
+      }).catch(function () {});
   })();
 
   function fmtDate(d) {
