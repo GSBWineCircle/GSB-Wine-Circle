@@ -2,7 +2,7 @@
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const db = require('../db');
-const { requireAuth, requireAdmin } = require('../middleware/auth');
+const { requireAuth, requireAdmin, requireExecTeam } = require('../middleware/auth');
 const { audit } = require('../services/audit');
 const { getSettings } = require('../services/email');
 const { recomputeBalance, promoteNextWaitlist } = require('../services/fees');
@@ -408,6 +408,42 @@ router.post('/:id/demote', requireAdmin, async (req, res) => {
     return res.json({ signup: rows[0], promoted: !!promoted });
   } catch (err) {
     await client.query('ROLLBACK');
+    console.error(err);
+    res.status(500).json({ error: 'Internal error' });
+  } finally {
+    client.release();
+  }
+});
+
+// POST /api/signups/:id/remove-from-lottery — Exec Team: take a member out of
+// an event's lottery before it is run. Only a Pending signup on an event that
+// hasn't been lotteried can be removed; the row is deleted (the full row is
+// kept in the audit log) so it can't be drawn. Note this frees them to sign up
+// again while signups are still open - close signups first if that matters.
+router.post('/:id/remove-from-lottery', requireAdmin, requireExecTeam, async (req, res) => {
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query(
+      `SELECT s.*, e.status AS event_status
+       FROM signups s JOIN events e ON e.event_id = s.event_id
+       WHERE s.signup_id = $1 FOR UPDATE OF s`,
+      [req.params.id]
+    );
+    if (!rows.length) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Signup not found' }); }
+    const s = rows[0];
+    if (s.status !== 'Pending' || !['Open', 'Closed', 'Draft'].includes(s.event_status)) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Members can only be removed from the lottery before it has been run.' });
+    }
+    await client.query('DELETE FROM signups WHERE signup_id = $1', [req.params.id]);
+    await client.query('COMMIT');
+
+    const { event_status, decline_token, ...before } = s;
+    await audit(req.member.email, 'RemoveFromLottery', 'signups', req.params.id, before, null);
+    return res.json({ ok: true });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
     console.error(err);
     res.status(500).json({ error: 'Internal error' });
   } finally {

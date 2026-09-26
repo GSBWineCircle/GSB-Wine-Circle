@@ -1592,6 +1592,7 @@ async function loadEventSignups(eventId) {
           <div class="td-actions">
             ${s.status === 'Waitlist' ? `<button class="btn-secondary btn-sm" onclick="promoteSignup('${s.signup_id}')">Promote</button>` : ''}
             ${s.status === 'Invited' ? `<button class="btn-secondary btn-sm" onclick="demoteSignup('${s.signup_id}')">Remove from Invited</button>` : ''}
+            ${s.status === 'Pending' && currentMember?.is_exec_team ? `<button class="btn-danger btn-sm" onclick="removeFromLottery('${s.signup_id}', '${esc(s.member_name).replace(/'/g, '&#39;')}')">Remove from lottery</button>` : ''}
           </div>
         </td>
       </tr>
@@ -1646,6 +1647,18 @@ async function promoteSignup(signupId) {
   } catch (e) {
     toast('Error: ' + e.message, 'error');
   }
+}
+
+async function removeFromLottery(signupId, name) {
+  confirm('Remove from lottery', `Remove ${name} from this event's lottery? They won't be drawn. (While signups are still open they could sign up again.)`, 'btn-danger', async () => {
+    try {
+      await api('POST', `/signups/${signupId}/remove-from-lottery`);
+      toast('Removed from the lottery', 'success');
+      await loadEventSignups(currentEventId);
+    } catch (e) {
+      toast('Error: ' + e.message, 'error');
+    }
+  });
 }
 
 async function demoteSignup(signupId) {
