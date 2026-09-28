@@ -129,6 +129,39 @@ function isMemberBlocked(member) {
   return parseFloat(member.fee_balance) > 0 || member.status === 'Blocked';
 }
 
+// Events in these statuses have already happened or won't happen at all, so
+// there is no "invite" left to manually add someone to.
+const NOT_MANUAL_ADDABLE_EVENT_STATUSES = ['Completed', 'Cancelled'];
+
+/**
+ * Decide whether an Exec Team member may manually add `member` to `event`
+ * as an Invited guest — bypassing the lottery, even after it has already
+ * been run. Pure: takes plain rows, makes no DB calls.
+ *
+ * @param {object|null} event           — must have .status
+ * @param {object|null} member          — must have .fee_balance, .status
+ * @param {object|null} existingSignup  — this member's current signup for
+ *   the event, if any; must have .status
+ * @returns {{ok: true} | {ok: false, error: string}}
+ */
+function canManualAddToEvent(event, member, existingSignup) {
+  if (!event) return { ok: false, error: 'Event not found.' };
+  if (NOT_MANUAL_ADDABLE_EVENT_STATUSES.includes(event.status)) {
+    return { ok: false, error: `This event is ${event.status.toLowerCase()} and can no longer take new invites.` };
+  }
+  if (!member) return { ok: false, error: 'Member not found.' };
+  if (isMemberBlocked(member)) {
+    return { ok: false, error: 'This member has an outstanding flake fee and is blocked from joining events.' };
+  }
+  if (existingSignup?.status === 'Invited') {
+    return { ok: false, error: 'This member is already invited to this event.' };
+  }
+  if (existingSignup?.status === 'Attended') {
+    return { ok: false, error: 'This member already attended this event.' };
+  }
+  return { ok: true };
+}
+
 module.exports = {
   computeBalance,
   determineDeclineOutcome,
@@ -137,4 +170,5 @@ module.exports = {
   shouldAutoPromote,
   classifyFinalizeSignups,
   isMemberBlocked,
+  canManualAddToEvent,
 };

@@ -10,6 +10,7 @@ const {
   determineDeclineOutcome,
   isMemberBlocked,
   shouldAutoPromote,
+  canManualAddToEvent,
 } = require('../services/signupLogic');
 
 const router = express.Router();
@@ -442,6 +443,77 @@ router.post('/:id/remove-from-lottery', requireAdmin, requireExecTeam, async (re
     const { event_status, decline_token, ...before } = s;
     await audit(req.member.email, 'RemoveFromLottery', 'signups', req.params.id, before, null);
     return res.json({ ok: true });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error(err);
+    res.status(500).json({ error: 'Internal error' });
+  } finally {
+    client.release();
+  }
+});
+
+// POST /api/signups/manual-add — Exec Team: manually invite a member to an
+// event, bypassing the lottery entirely - including after it has already
+// been run. If the member already has a signup for this event (e.g. they
+// were Waitlisted, Dropped, or never got drawn), that row is turned into an
+// Invite instead of creating a duplicate; otherwise a new Invited signup is
+// created. Capacity is NOT enforced - exceeding it is exactly the kind of
+// deliberate override this exists for - but the response flags it so the
+// admin UI can warn rather than silently going over.
+router.post('/manual-add', requireAdmin, requireExecTeam, async (req, res) => {
+  const { event_id, member_id } = req.body;
+  if (!event_id || !member_id) return res.status(400).json({ error: 'event_id and member_id are required.' });
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    const [{ rows: evRows }, { rows: memRows }, { rows: sigRows }] = await Promise.all([
+      client.query('SELECT * FROM events WHERE event_id = $1 FOR UPDATE', [event_id]),
+      client.query('SELECT * FROM members WHERE member_id = $1', [member_id]),
+      client.query('SELECT * FROM signups WHERE event_id = $1 AND member_id = $2 FOR UPDATE', [event_id, member_id]),
+    ]);
+    const event = evRows[0] || null;
+    const member = memRows[0] || null;
+    const existing = sigRows[0] || null;
+
+    const check = canManualAddToEvent(event, member, existing);
+    if (!check.ok) { await client.query('ROLLBACK'); return res.status(400).json({ error: check.error }); }
+
+    const declineToken = uuidv4().replace(/-/g, '') + uuidv4().replace(/-/g, '');
+    let signup;
+    if (existing) {
+      const { rows } = await client.query(
+        `UPDATE signups SET
+           status = 'Invited', member_visible_status = 'Invited',
+           decline_token = $1, invite_sent_at = NOW(), declined_at = NULL,
+           member_name = $2, member_email = $3
+         WHERE signup_id = $4 RETURNING *`,
+        [declineToken, member.full_name, member.email, existing.signup_id]
+      );
+      signup = rows[0];
+    } else {
+      const signupId = 's_' + uuidv4().replace(/-/g, '');
+      const { rows } = await client.query(
+        `INSERT INTO signups
+           (signup_id, event_id, event_name, member_id, member_name, member_email,
+            email_at_signup, status, member_visible_status, decline_token, invite_sent_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $6, 'Invited', 'Invited', $7, NOW())
+         RETURNING *`,
+        [signupId, event_id, event.name, member_id, member.full_name, member.email, declineToken]
+      );
+      signup = rows[0];
+    }
+
+    const { rows: countRows } = await client.query(
+      `SELECT count(*)::int AS n FROM signups WHERE event_id = $1 AND status = 'Invited'`, [event_id]
+    );
+    const capacityExceeded = parseInt(event.capacity) > 0 && countRows[0].n > parseInt(event.capacity);
+
+    await client.query('COMMIT');
+
+    await audit(req.member.email, 'ManualAddToEvent', 'signups', signup.signup_id,
+      existing ? { status: existing.status } : null, { status: 'Invited', member_id, event_id });
+    return res.status(existing ? 200 : 201).json({ signup, capacityExceeded });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     console.error(err);

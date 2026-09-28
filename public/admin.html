@@ -680,7 +680,8 @@
 
         <div id="tab-signups" class="tab-panel active">
           <div class="stat-grid" id="event-signup-stats"></div>
-          <div style="display:flex; justify-content:flex-end; margin-bottom:10px;">
+          <div style="display:flex; justify-content:flex-end; gap:8px; margin-bottom:10px;">
+            <button class="btn-primary btn-sm" id="btn-manual-add" style="display:none;" onclick="openManualAdd()">+ Add Member</button>
             <button class="btn-secondary btn-sm" onclick="loadEventSignups(currentEventId)">↻ Refresh</button>
           </div>
           <div class="card table-wrap">
@@ -1199,6 +1200,36 @@
   </div>
 </div>
 
+<!-- Manual add-to-event modal (Exec Team only) -->
+<div class="modal-overlay" id="modal-manual-add">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Add Member to Event</h3>
+      <button class="modal-close" onclick="closeModal('modal-manual-add')">×</button>
+    </div>
+    <div class="modal-body">
+      <div id="modal-manual-add-alert"></div>
+      <p class="text-muted" style="font-size:13px; margin-bottom:14px;">
+        Invites this member directly, bypassing the lottery - works even after the lottery has already run.
+      </p>
+      <div class="form-group">
+        <label for="manual-add-search">Member</label>
+        <div class="search-select-wrap" id="manual-add-search-wrap">
+          <input type="search" id="manual-add-search" placeholder="Search members by name or email…"
+                 autocomplete="off" oninput="filterManualAddSearch()" onfocus="filterManualAddSearch()"
+                 onkeydown="if (event.key === 'Escape') closeManualAddResults();" />
+          <input type="hidden" id="manual-add-member-id" />
+          <div id="manual-add-results" class="search-select-results" style="display:none;"></div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" onclick="closeModal('modal-manual-add')">Cancel</button>
+      <button class="btn-primary" id="modal-manual-add-submit" onclick="submitManualAdd()" disabled>Add to Event</button>
+    </div>
+  </div>
+</div>
+
 <!-- Confirm modal -->
 <div class="modal-overlay" id="modal-confirm">
   <div class="modal" style="max-width:400px;">
@@ -1550,6 +1581,7 @@ async function openEventDetail(eventId) {
     document.getElementById('toggle-dollar-value').checked = !!ev.show_dollar_value;
     document.getElementById('toggle-visible-before-open').checked = !!ev.visible_before_open;
     document.getElementById('btn-delete-event').style.display = currentMember?.is_exec_team ? '' : 'none';
+    document.getElementById('btn-manual-add').style.display = currentMember?.is_exec_team ? '' : 'none';
 
     await loadEventSignups(eventId);
   } catch (e) {
@@ -1646,6 +1678,88 @@ async function promoteSignup(signupId) {
     await loadEventSignups(currentEventId);
   } catch (e) {
     toast('Error: ' + e.message, 'error');
+  }
+}
+
+let manualAddMembers = [];      // full member roster, fetched fresh each time the modal opens
+let manualAddSignupsByMember = {}; // member_id -> current signup status for this event, if any
+
+async function openManualAdd() {
+  document.getElementById('manual-add-search').value = '';
+  document.getElementById('manual-add-member-id').value = '';
+  document.getElementById('modal-manual-add-submit').disabled = true;
+  clearAlert('modal-manual-add-alert');
+  closeManualAddResults();
+  openModal('modal-manual-add');
+  try {
+    const [membersRes, signupsRes] = await Promise.all([
+      api('GET', '/members'),
+      api('GET', `/events/${currentEventId}/signups`),
+    ]);
+    manualAddMembers = membersRes.members || membersRes;
+    manualAddSignupsByMember = {};
+    (signupsRes.signups || signupsRes).forEach(s => { manualAddSignupsByMember[s.member_id] = s.status; });
+    filterManualAddSearch();
+  } catch (e) {
+    showAlert('modal-manual-add-alert', 'Failed to load members: ' + e.message, 'error');
+  }
+}
+
+function filterManualAddSearch() {
+  const query = document.getElementById('manual-add-search').value.trim().toLowerCase();
+  const results = document.getElementById('manual-add-results');
+  const matches = query
+    ? manualAddMembers.filter(m => m.full_name.toLowerCase().includes(query) || m.email.toLowerCase().includes(query))
+    : manualAddMembers;
+
+  results.innerHTML = matches.length
+    ? matches.slice(0, 50).map(m => {
+        const status = manualAddSignupsByMember[m.member_id];
+        const blocked = parseFloat(m.fee_balance) > 0 || m.status === 'Blocked';
+        return `
+        <div class="search-select-item" data-member-id="${esc(m.member_id)}" data-full-name="${esc(m.full_name)}"
+             onclick="selectManualAddMember(this.dataset.memberId, this.dataset.fullName)">
+          <span style="font-weight:600;">${esc(m.full_name)}
+            ${status ? `<span class="badge badge-${status.toLowerCase()}" style="margin-left:6px;">${esc(status)}</span>` : ''}
+            ${blocked ? `<span class="badge badge-blocked" style="margin-left:6px;">Blocked</span>` : ''}
+          </span>
+          <span class="monospace" style="color:var(--muted); font-size:11px;">${esc(m.email)}</span>
+        </div>`;
+      }).join('')
+    : '<div class="search-select-empty">No members found.</div>';
+  results.style.display = 'block';
+}
+
+function selectManualAddMember(memberId, fullName) {
+  document.getElementById('manual-add-member-id').value = memberId;
+  document.getElementById('manual-add-search').value = fullName;
+  document.getElementById('modal-manual-add-submit').disabled = false;
+  closeManualAddResults();
+}
+
+function closeManualAddResults() {
+  document.getElementById('manual-add-results').style.display = 'none';
+}
+
+document.addEventListener('click', e => {
+  const wrap = document.getElementById('manual-add-search-wrap');
+  if (wrap && !wrap.contains(e.target)) closeManualAddResults();
+});
+
+async function submitManualAdd() {
+  const memberId = document.getElementById('manual-add-member-id').value;
+  if (!memberId) return;
+  clearAlert('modal-manual-add-alert');
+  const btn = document.getElementById('modal-manual-add-submit');
+  btn.disabled = true;
+  try {
+    const res = await api('POST', '/signups/manual-add', { event_id: currentEventId, member_id: memberId });
+    closeModal('modal-manual-add');
+    toast('Member invited to the event' + (res.capacityExceeded ? ' — capacity exceeded' : ''), res.capacityExceeded ? 'warning' : 'success');
+    await loadEventSignups(currentEventId);
+  } catch (e) {
+    showAlert('modal-manual-add-alert', e.message, 'error');
+    btn.disabled = false;
   }
 }
 

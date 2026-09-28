@@ -16,6 +16,7 @@ const {
   shouldAutoPromote,
   classifyFinalizeSignups,
   isMemberBlocked,
+  canManualAddToEvent,
 } = require('../services/signupLogic');
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -502,5 +503,84 @@ describe('Fee-blocked member cannot enter lottery', () => {
     const newBal = computeBalance(ledger);
     const memberAfterPayment = { fee_balance: newBal.toString(), status: 'Active' };
     expect(isMemberBlocked(memberAfterPayment)).toBe(false);
+  });
+});
+
+// ─── canManualAddToEvent ─────────────────────────────────────────────────────
+
+describe('canManualAddToEvent — Exec Team manual-add override', () => {
+  const okMember = { fee_balance: '0', status: 'Active' };
+  const openEvent = { status: 'Open' };
+
+  test('allowed: no existing signup, event Open, member in good standing', () => {
+    expect(canManualAddToEvent(openEvent, okMember, null)).toEqual({ ok: true });
+  });
+
+  test('allowed even after the lottery has run (event Lotteried)', () => {
+    expect(canManualAddToEvent({ status: 'Lotteried' }, okMember, null)).toEqual({ ok: true });
+  });
+
+  test('allowed with Closed or Draft events too', () => {
+    expect(canManualAddToEvent({ status: 'Closed' }, okMember, null).ok).toBe(true);
+    expect(canManualAddToEvent({ status: 'Draft' }, okMember, null).ok).toBe(true);
+  });
+
+  test('rejected: event Completed', () => {
+    const r = canManualAddToEvent({ status: 'Completed' }, okMember, null);
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/completed/i);
+  });
+
+  test('rejected: event Cancelled', () => {
+    const r = canManualAddToEvent({ status: 'Cancelled' }, okMember, null);
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/cancelled/i);
+  });
+
+  test('rejected: event not found', () => {
+    expect(canManualAddToEvent(null, okMember, null)).toEqual({ ok: false, error: 'Event not found.' });
+  });
+
+  test('rejected: member not found', () => {
+    const r = canManualAddToEvent(openEvent, null, null);
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/member not found/i);
+  });
+
+  test('rejected: blocked member (outstanding fee)', () => {
+    const r = canManualAddToEvent(openEvent, { fee_balance: '30', status: 'Active' }, null);
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/blocked/i);
+  });
+
+  test('rejected: blocked member (Blocked status, zero balance)', () => {
+    const r = canManualAddToEvent(openEvent, { fee_balance: '0', status: 'Blocked' }, null);
+    expect(r.ok).toBe(false);
+  });
+
+  test('rejected: already Invited', () => {
+    const r = canManualAddToEvent(openEvent, okMember, { status: 'Invited' });
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/already invited/i);
+  });
+
+  test('rejected: already Attended', () => {
+    const r = canManualAddToEvent(openEvent, okMember, { status: 'Attended' });
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/already attended/i);
+  });
+
+  test('allowed: existing Waitlist signup can be turned into an invite', () => {
+    expect(canManualAddToEvent(openEvent, okMember, { status: 'Waitlist' })).toEqual({ ok: true });
+  });
+
+  test('allowed: existing Pending signup can be turned into an invite', () => {
+    expect(canManualAddToEvent(openEvent, okMember, { status: 'Pending' }).ok).toBe(true);
+  });
+
+  test('allowed: existing Dropped/Flaked/Lost signup can be re-invited', () => {
+    expect(canManualAddToEvent(openEvent, okMember, { status: 'Dropped' }).ok).toBe(true);
+    expect(canManualAddToEvent(openEvent, okMember, { status: 'Flaked' }).ok).toBe(true);
+    expect(canManualAddToEvent(openEvent, okMember, { status: 'Lost' }).ok).toBe(true);
   });
 });
