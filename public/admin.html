@@ -692,13 +692,14 @@
                   <th>Member</th>
                   <th>Email</th>
                   <th>Status</th>
+                  <th id="th-birth-year" style="display:none;">Birth Year</th>
                   <th>Portal</th>
                   <th>Signed Up</th>
                   <th>Actions</th>
                 </tr>
               </thead>
               <tbody id="event-signups-tbody">
-                <tr class="loading-row"><td colspan="7"><span class="spinner"></span></td></tr>
+                <tr class="loading-row"><td colspan="8"><span class="spinner"></span></td></tr>
               </tbody>
             </table>
           </div>
@@ -1156,6 +1157,14 @@
         <label for="ev-dollar-value">Dollar Value (per member, optional)</label>
         <input type="number" id="ev-dollar-value" min="0" step="0.01" placeholder="e.g. 50" />
       </div>
+      <div class="form-group" id="ev-birth-year-group" style="display:none;">
+        <label for="ev-birth-year-priority">Birth-Year Lottery Priority (optional, Exec Team only)</label>
+        <input type="number" id="ev-birth-year-priority" min="1900" step="1" placeholder="e.g. 1996 — for a birthday tasting" />
+        <p class="text-muted" style="font-size:12px; margin-top:4px;">
+          Any Pending entrant who has verified (birth date + ID photo) they were born in this year always wins the
+          lottery for this event, the same as Admin/Exec Team. Leave blank for a normal lottery.
+        </p>
+      </div>
       <div class="form-row">
         <div class="form-group">
           <label for="ev-signup-opens">Signup Opens (Pacific Time)</label>
@@ -1226,6 +1235,23 @@
     <div class="modal-footer">
       <button class="btn-secondary" onclick="closeModal('modal-manual-add')">Cancel</button>
       <button class="btn-primary" id="modal-manual-add-submit" onclick="submitManualAdd()" disabled>Add to Event</button>
+    </div>
+  </div>
+</div>
+
+<!-- ID photo viewer (Exec Team only, birth-year verification) -->
+<div class="modal-overlay" id="modal-id-photo">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="modal-id-photo-title">ID Photo</h3>
+      <button class="modal-close" onclick="closeIdPhotoModal()">×</button>
+    </div>
+    <div class="modal-body" style="text-align:center;">
+      <div id="modal-id-photo-body"><span class="spinner"></span></div>
+    </div>
+    <div class="modal-footer" style="justify-content:space-between;">
+      <button class="btn-danger btn-sm" id="modal-id-photo-delete" onclick="deleteIdPhotoFromModal()">Delete Photo</button>
+      <button class="btn-secondary" onclick="closeIdPhotoModal()">Close</button>
     </div>
   </div>
 </div>
@@ -1574,6 +1600,7 @@ async function openEventDetail(eventId) {
       <div class="meta-item"><div class="meta-label">Signup Opens</div><div class="meta-value">${ev.signup_opens_at ? fmtDate(ev.signup_opens_at) : '—'}</div></div>
       <div class="meta-item"><div class="meta-label">Signup Closes</div><div class="meta-value">${ev.signup_closes_at ? fmtDate(ev.signup_closes_at) : '—'}</div></div>
       <div class="meta-item"><div class="meta-label">Created By</div><div class="meta-value">${esc(ev.created_by) || '—'}</div></div>
+      ${ev.birth_year_priority ? `<div class="meta-item"><div class="meta-label">Birth-Year Priority</div><div class="meta-value">${ev.birth_year_priority}</div></div>` : ''}
     `;
 
     document.getElementById('toggle-auto-invite').checked = !!ev.auto_invite_enabled;
@@ -1591,10 +1618,14 @@ async function openEventDetail(eventId) {
 
 async function loadEventSignups(eventId) {
   const tbody = document.getElementById('event-signups-tbody');
-  tbody.innerHTML = '<tr class="loading-row"><td colspan="7"><span class="spinner"></span></td></tr>';
+  tbody.innerHTML = '<tr class="loading-row"><td colspan="8"><span class="spinner"></span></td></tr>';
   try {
     const signupsRes = await api('GET', `/events/${eventId}/signups`);
     const signups = signupsRes.signups || signupsRes;
+    const showBirthYear = !!signupsRes.birthYearPriority && !!currentMember?.is_exec_team;
+    document.getElementById('th-birth-year').style.display = showBirthYear ? '' : 'none';
+    document.getElementById('th-birth-year').textContent = `Born ${signupsRes.birthYearPriority || ''}?`;
+
     const counts = { Pending:0, Invited:0, Waitlist:0, Lost:0, Declined:0, Attended:0, Flaked:0, Dropped:0 };
     signups.forEach(s => { if (counts[s.status] !== undefined) counts[s.status]++; });
 
@@ -1607,7 +1638,7 @@ async function loadEventSignups(eventId) {
     `;
 
     if (!signups.length) {
-      tbody.innerHTML = '<tr class="loading-row"><td colspan="7" style="color:var(--muted)">No signups yet.</td></tr>';
+      tbody.innerHTML = '<tr class="loading-row"><td colspan="8" style="color:var(--muted)">No signups yet.</td></tr>';
       return;
     }
     tbody.innerHTML = signups.map((s, i) => `
@@ -1616,6 +1647,7 @@ async function loadEventSignups(eventId) {
         <td style="font-weight:600">${esc(s.member_name)}</td>
         <td>${esc(s.member_email)}</td>
         <td><span class="badge badge-${s.status.toLowerCase()}">${s.status}</span></td>
+        ${showBirthYear ? `<td>${birthYearCell(s)}</td>` : ''}
         <td>${s.status === s.member_visible_status
           ? '<span class="badge badge-active">Synced</span>'
           : `<span class="badge badge-pending" title="Member still sees: ${esc(s.member_visible_status)}">Pending Push</span>`}</td>
@@ -1630,8 +1662,65 @@ async function loadEventSignups(eventId) {
       </tr>
     `).join('');
   } catch (e) {
-    tbody.innerHTML = `<tr class="loading-row"><td colspan="7" class="text-danger">Error: ${esc(e.message)}</td></tr>`;
+    tbody.innerHTML = `<tr class="loading-row"><td colspan="8" class="text-danger">Error: ${esc(e.message)}</td></tr>`;
   }
+}
+
+let idPhotoBlobUrl = null;   // revoked on close so the image isn't held in memory forever
+let idPhotoMemberId = null;
+
+async function viewIdPhoto(memberId, name) {
+  idPhotoMemberId = memberId;
+  document.getElementById('modal-id-photo-title').textContent = `ID Photo — ${name}`;
+  document.getElementById('modal-id-photo-body').innerHTML = '<span class="spinner"></span>';
+  document.getElementById('modal-id-photo-delete').style.display = currentMember?.is_exec_team ? '' : 'none';
+  openModal('modal-id-photo');
+  try {
+    const res = await fetch(`/api/members/${memberId}/id-photo`, {
+      headers: sessionToken ? { 'x-session-token': sessionToken } : {},
+    });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
+    const blob = await res.blob();
+    if (idPhotoBlobUrl) URL.revokeObjectURL(idPhotoBlobUrl);
+    idPhotoBlobUrl = URL.createObjectURL(blob);
+    document.getElementById('modal-id-photo-body').innerHTML =
+      `<img src="${idPhotoBlobUrl}" alt="ID photo" style="max-width:100%; max-height:70vh; border-radius:6px;" />`;
+  } catch (e) {
+    document.getElementById('modal-id-photo-body').innerHTML = `<div class="text-danger">Error: ${esc(e.message)}</div>`;
+  }
+}
+
+function closeIdPhotoModal() {
+  closeModal('modal-id-photo');
+  if (idPhotoBlobUrl) { URL.revokeObjectURL(idPhotoBlobUrl); idPhotoBlobUrl = null; }
+  idPhotoMemberId = null;
+}
+
+function deleteIdPhotoFromModal() {
+  const memberId = idPhotoMemberId;
+  if (!memberId) return;
+  confirm('Delete ID photo', 'Permanently delete this member\'s uploaded ID photo? Their birth date on file is kept.', 'btn-danger', async () => {
+    try {
+      await api('DELETE', `/members/${memberId}/id-photo`);
+      toast('ID photo deleted', 'success');
+      closeIdPhotoModal();
+      await loadEventSignups(currentEventId);
+    } catch (e) {
+      toast('Error: ' + e.message, 'error');
+    }
+  });
+}
+
+// Birth-year verification cell: a match/no-match badge, plus a button to view
+// the ID photo if one was uploaded (Exec Team only column to begin with).
+function birthYearCell(s) {
+  const badge = s.birthYearMatch
+    ? '<span class="badge badge-active">Verified</span>'
+    : (s.hasIdPhoto ? '<span class="badge badge-inactive">No match</span>' : '<span class="badge badge-inactive">Not provided</span>');
+  const viewBtn = s.hasIdPhoto
+    ? ` <button class="btn-icon btn-sm" title="View ID photo" onclick="viewIdPhoto('${s.member_id}', '${esc(s.member_name).replace(/'/g, '&#39;')}')">🪪</button>`
+    : '';
+  return badge + viewBtn;
 }
 
 async function loadAttendance() {
@@ -1812,8 +1901,8 @@ async function eventAction(action) {
             <div class="stat-card"><div class="stat-value" style="color:var(--info)">${r.invited ?? 0}</div><div class="stat-label">Invited</div></div>
             <div class="stat-card"><div class="stat-value" style="color:var(--warning)">${r.waitlist ?? 0}</div><div class="stat-label">Waitlist</div></div>
           </div>
-          ${r.priorityInvited ? `<p style="margin-top:12px;font-size:13px;">Includes <strong>${r.priorityInvited}</strong> Admin/Exec Team member(s), who always win a spot.</p>` : ''}
-          ${r.capacityExceededByPriority ? `<p style="margin-top:8px;color:var(--danger);font-size:13px;">⚠ Admin/Exec entrants alone exceeded capacity, so ${r.capacityExceededByPriority} more member(s) were invited than the event's stated capacity.</p>` : ''}
+          ${r.priorityInvited ? `<p style="margin-top:12px;font-size:13px;">Includes <strong>${r.priorityInvited}</strong> member(s) who always win a spot (Admin/Exec Team${r.birthYearPriority ? `, or verified born in ${r.birthYearPriority}` : ''}).</p>` : ''}
+          ${r.capacityExceededByPriority ? `<p style="margin-top:8px;color:var(--danger);font-size:13px;">⚠ Those priority entrants alone exceeded capacity, so ${r.capacityExceededByPriority} more member(s) were invited than the event's stated capacity.</p>` : ''}
           <p style="margin-top:16px;color:var(--muted);font-size:13px;">The lottery has been run. Review the signups table, create a calendar invite, and click "Push Portal Updates" when you're ready for members to see the results.</p>
         `;
         openModal('modal-lottery');
@@ -2007,9 +2096,10 @@ function openCreateEvent() {
   document.getElementById('modal-event-title').textContent = 'New Event';
   document.getElementById('modal-event-submit').textContent = 'Create Event';
   clearAlert('modal-event-alert');
-  ['ev-name','ev-location','ev-description','ev-host-notes','ev-dollar-value'].forEach(id => document.getElementById(id).value = '');
+  ['ev-name','ev-location','ev-description','ev-host-notes','ev-dollar-value','ev-birth-year-priority'].forEach(id => document.getElementById(id).value = '');
   ['ev-date','ev-signup-opens','ev-signup-closes'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('ev-capacity').value = '60';
+  document.getElementById('ev-birth-year-group').style.display = currentMember?.is_exec_team ? '' : 'none';
   openModal('modal-event');
 }
 
@@ -2031,6 +2121,8 @@ async function openEditEventById(eventId, e) {
     document.getElementById('ev-date').value = ev.event_date ? utcToPacificInput(ev.event_date) : '';
     document.getElementById('ev-signup-opens').value = ev.signup_opens_at ? utcToPacificInput(ev.signup_opens_at) : '';
     document.getElementById('ev-signup-closes').value = ev.signup_closes_at ? utcToPacificInput(ev.signup_closes_at) : '';
+    document.getElementById('ev-birth-year-priority').value = ev.birth_year_priority ?? '';
+    document.getElementById('ev-birth-year-group').style.display = currentMember?.is_exec_team ? '' : 'none';
     openModal('modal-event');
   } catch (err) {
     toast('Failed to load event: ' + err.message, 'error');
@@ -2055,6 +2147,14 @@ async function saveEvent() {
     signup_closes_at:localInputToUTC(document.getElementById('ev-signup-closes').value),
     dollar_value:    document.getElementById('ev-dollar-value').value === '' ? null : parseFloat(document.getElementById('ev-dollar-value').value),
   };
+  // Only send this field at all when the admin can actually see/edit it -
+  // otherwise a non-exec admin saving unrelated changes would unintentionally
+  // clear an existing birth-year priority (or hit the exec-only 403 for a
+  // field they never touched).
+  if (currentMember?.is_exec_team) {
+    payload.birth_year_priority = document.getElementById('ev-birth-year-priority').value === ''
+      ? null : parseInt(document.getElementById('ev-birth-year-priority').value, 10);
+  }
   const btn = document.getElementById('modal-event-submit');
   btn.disabled = true;
   try {

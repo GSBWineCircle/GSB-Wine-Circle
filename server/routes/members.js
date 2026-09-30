@@ -6,6 +6,8 @@ const { requireAuth, requireAdmin, requireExecTeam } = require('../middleware/au
 const { audit } = require('../services/audit');
 const { getSettings } = require('../services/email');
 const { promoteNextWaitlist } = require('../services/fees');
+const { isValidBirthDateInput } = require('../services/signupLogic');
+const { ALLOWED_IMAGE_TYPES, MAX_IMAGE_BYTES } = require('../services/instagramHelpers');
 
 const router = express.Router();
 
@@ -503,6 +505,129 @@ router.get('/:id/outstanding-charges', requireAuth, async (req, res) => {
       balance: memberRows[0] ? parseFloat(memberRows[0].fee_balance) : 0,
       charges: outstanding,
     });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal error' });
+  }
+});
+
+// ── Birth-year verification (birthday tastings) ─────────────────────────────
+
+// GET /api/members/me/birth-info — member: own verification status. Never
+// returns the photo bytes themselves, just whether one is on file.
+router.get('/me/birth-info', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await db.query(
+      `SELECT birth_date, id_photo_content_type, id_photo_uploaded_at,
+              (id_photo IS NOT NULL) AS has_id_photo
+       FROM members WHERE member_id = $1`,
+      [req.member.member_id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Member not found' });
+    const r = rows[0];
+    return res.json({
+      birth_date: r.birth_date || null,
+      has_id_photo: r.has_id_photo,
+      id_photo_uploaded_at: r.id_photo_uploaded_at,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal error' });
+  }
+});
+
+// PATCH /api/members/me/birth-info — member: set/update own birth date and/or
+// ID photo. Either field can be sent alone; passing null for either clears it.
+router.patch('/me/birth-info', requireAuth, async (req, res) => {
+  const { birth_date, id_photo_base64, id_photo_content_type } = req.body;
+  if (birth_date === undefined && id_photo_base64 === undefined) {
+    return res.status(400).json({ error: 'Nothing to update.' });
+  }
+
+  const sets = [];
+  const params = [];
+  let i = 1;
+
+  if (birth_date !== undefined) {
+    if (birth_date === null || birth_date === '') {
+      sets.push('birth_date = NULL');
+    } else {
+      if (!isValidBirthDateInput(birth_date)) {
+        return res.status(400).json({ error: 'Enter a valid birth date (not in the future).' });
+      }
+      sets.push(`birth_date = $${i++}`);
+      params.push(birth_date);
+    }
+  }
+
+  if (id_photo_base64 !== undefined) {
+    if (id_photo_base64 === null) {
+      sets.push('id_photo = NULL', 'id_photo_content_type = NULL', 'id_photo_uploaded_at = NULL');
+    } else {
+      if (!id_photo_content_type || !ALLOWED_IMAGE_TYPES.includes(id_photo_content_type)) {
+        return res.status(400).json({ error: 'Photo must be a JPEG, PNG or WebP image.' });
+      }
+      let buf;
+      try {
+        buf = Buffer.from(String(id_photo_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
+      } catch (e) {
+        return res.status(400).json({ error: 'Invalid photo data.' });
+      }
+      if (!buf.length) return res.status(400).json({ error: 'Invalid photo data.' });
+      if (buf.length > MAX_IMAGE_BYTES) return res.status(400).json({ error: 'Photo is too large.' });
+      sets.push(`id_photo = $${i++}`);
+      params.push(buf);
+      sets.push(`id_photo_content_type = $${i++}`);
+      params.push(id_photo_content_type);
+      sets.push('id_photo_uploaded_at = NOW()');
+    }
+  }
+
+  params.push(req.member.member_id);
+  try {
+    await db.query(`UPDATE members SET ${sets.join(', ')} WHERE member_id = $${i}`, params);
+    await audit(req.member.email, 'UpdateBirthInfo', 'members', req.member.member_id, null, {
+      birth_date_changed: birth_date !== undefined,
+      id_photo_changed: id_photo_base64 !== undefined,
+    });
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal error' });
+  }
+});
+
+// GET /api/members/:id/id-photo — Exec Team only: view a member's uploaded ID
+// photo, to confirm a birth-year claim by eye. Never cached by shared/proxy
+// caches, since it's a picture of someone's government ID.
+router.get('/:id/id-photo', requireAdmin, requireExecTeam, async (req, res) => {
+  try {
+    const { rows } = await db.query(
+      'SELECT id_photo, id_photo_content_type FROM members WHERE member_id = $1', [req.params.id]
+    );
+    if (!rows.length || !rows[0].id_photo) return res.status(404).end();
+    res.set('Content-Type', rows[0].id_photo_content_type);
+    res.set('Cache-Control', 'private, no-store');
+    res.set('X-Content-Type-Options', 'nosniff');
+    return res.send(rows[0].id_photo);
+  } catch (err) {
+    console.error(err);
+    res.status(500).end();
+  }
+});
+
+// DELETE /api/members/:id/id-photo — Exec Team only: privacy cleanup once a
+// tasting is done (or on a member's request). Leaves birth_date untouched.
+router.delete('/:id/id-photo', requireAdmin, requireExecTeam, async (req, res) => {
+  try {
+    const { rowCount } = await db.query(
+      `UPDATE members SET id_photo = NULL, id_photo_content_type = NULL, id_photo_uploaded_at = NULL
+       WHERE member_id = $1 AND id_photo IS NOT NULL`,
+      [req.params.id]
+    );
+    if (!rowCount) return res.status(404).json({ error: 'No photo on file for this member.' });
+    await audit(req.member.email, 'DeleteIdPhoto', 'members', req.params.id, { hadPhoto: true }, null);
+    return res.json({ ok: true });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Internal error' });

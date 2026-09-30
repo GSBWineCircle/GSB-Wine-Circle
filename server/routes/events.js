@@ -9,6 +9,8 @@ const { recomputeBalance } = require('../services/fees');
 const {
   assignLotteryResultsWithPriority,
   classifyFinalizeSignups,
+  hasBirthYearPriority,
+  isValidBirthYear,
 } = require('../services/signupLogic');
 
 const router = express.Router();
@@ -80,9 +82,20 @@ router.post('/', requireAdmin, async (req, res) => {
   const {
     name, event_date, location, capacity, description, host_notes,
     signup_opens_at, signup_closes_at, auto_invite_enabled, send_lottery_lost_emails,
-    dollar_value, show_dollar_value, visible_before_open,
+    dollar_value, show_dollar_value, visible_before_open, birth_year_priority,
   } = req.body;
   if (!name) return res.status(400).json({ error: 'name required' });
+
+  // Birth-year priority grants an automatic lottery win, the same as
+  // Admin/Exec - gated to Exec Team even though event creation itself isn't.
+  if (birth_year_priority !== undefined && birth_year_priority !== null && birth_year_priority !== '') {
+    if (!req.member.is_exec_team) {
+      return res.status(403).json({ error: 'Only Exec Team members can set a birth-year lottery priority.' });
+    }
+    if (!isValidBirthYear(birth_year_priority)) {
+      return res.status(400).json({ error: 'Birth-year priority must be a plausible past year.' });
+    }
+  }
 
   try {
     const settings = await getSettings();
@@ -96,13 +109,14 @@ router.post('/', requireAdmin, async (req, res) => {
       : settings.default_send_lottery_lost_emails !== 'FALSE';
     const showDollarValue = show_dollar_value !== undefined ? !!show_dollar_value : true;
     const visibleBeforeOpen = visible_before_open !== undefined ? !!visible_before_open : true;
+    const birthYearPriority = birth_year_priority ? parseInt(birth_year_priority, 10) : null;
 
     const { rows } = await db.query(
       `INSERT INTO events
          (event_id, name, event_date, location, capacity, description, host_notes,
           signup_opens_at, signup_closes_at, auto_invite_enabled, send_lottery_lost_emails,
-          dollar_value, show_dollar_value, visible_before_open, status, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'Draft',$15)
+          dollar_value, show_dollar_value, visible_before_open, birth_year_priority, status, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'Draft',$16)
        RETURNING *`,
       [
         eventId, name, event_date || null, location || '', cap,
@@ -110,7 +124,7 @@ router.post('/', requireAdmin, async (req, res) => {
         signup_opens_at || null, signup_closes_at || null,
         autoInvite, sendLost,
         dollar_value === '' || dollar_value === undefined ? null : parseFloat(dollar_value),
-        showDollarValue, visibleBeforeOpen, req.member.email,
+        showDollarValue, visibleBeforeOpen, birthYearPriority, req.member.email,
       ]
     );
     await audit(req.member.email, 'CreateEvent', 'events', eventId, null, { name });
@@ -132,11 +146,26 @@ router.patch('/:id', requireAdmin, async (req, res) => {
     const allowed = [
       'name', 'event_date', 'location', 'capacity', 'description', 'host_notes',
       'signup_opens_at', 'signup_closes_at', 'auto_invite_enabled', 'send_lottery_lost_emails',
-      'dollar_value', 'show_dollar_value', 'visible_before_open',
+      'dollar_value', 'show_dollar_value', 'visible_before_open', 'birth_year_priority',
     ];
     const updates = {};
     allowed.forEach(f => { if (req.body[f] !== undefined) updates[f] = req.body[f]; });
     if (!Object.keys(updates).length) return res.status(400).json({ error: 'No valid fields' });
+
+    // Birth-year priority grants an automatic lottery win, the same as
+    // Admin/Exec - gated to Exec Team even though editing events isn't.
+    if ('birth_year_priority' in updates) {
+      if (!req.member.is_exec_team) {
+        return res.status(403).json({ error: 'Only Exec Team members can change a birth-year lottery priority.' });
+      }
+      if (updates.birth_year_priority === '' || updates.birth_year_priority === null) {
+        updates.birth_year_priority = null;
+      } else if (!isValidBirthYear(updates.birth_year_priority)) {
+        return res.status(400).json({ error: 'Birth-year priority must be a plausible past year.' });
+      } else {
+        updates.birth_year_priority = parseInt(updates.birth_year_priority, 10);
+      }
+    }
 
     const setClauses = Object.keys(updates).map((k, i) => `${k} = $${i + 2}`).join(', ');
     const { rows } = await db.query(
@@ -183,11 +212,13 @@ router.post('/:id/run-lottery', requireAdmin, async (req, res) => {
       return res.status(400).json({ error: 'Event must be Open or Closed to run lottery' });
     }
 
-    // Get all pending signups, plus each entrant's Admin/Exec status - Admins
-    // and Exec Team always win, so priority has to be decided here, not
-    // inferred later.
+    // Get all pending signups, plus each entrant's Admin/Exec status and
+    // (birth_date, has_id_photo) for birth-year priority - Admins, Exec Team,
+    // and (on events that opt in) verified birth-year matches always win, so
+    // priority has to be decided here, not inferred later. The actual photo
+    // bytes are never selected, just whether one exists.
     const { rows: pending } = await client.query(
-      `SELECT s.signup_id, m.is_admin, m.is_exec_team
+      `SELECT s.signup_id, m.is_admin, m.is_exec_team, m.birth_date, (m.id_photo IS NOT NULL) AS has_id_photo
        FROM signups s JOIN members m ON m.member_id = s.member_id
        WHERE s.event_id = $1 AND s.status = 'Pending'`, [id]
     );
@@ -197,7 +228,10 @@ router.post('/:id/run-lottery', requireAdmin, async (req, res) => {
     // independently random relative order.
     const shuffled = pending
       .sort(() => Math.random() - 0.5)
-      .map(r => ({ signup_id: r.signup_id, priority: !!(r.is_admin || r.is_exec_team) }));
+      .map(r => ({
+        signup_id: r.signup_id,
+        priority: !!(r.is_admin || r.is_exec_team || hasBirthYearPriority(r, event.birth_year_priority)),
+      }));
     const capacity = parseInt(event.capacity) || 60;
 
     // Use shared logic to assign ranks and statuses
@@ -224,10 +258,11 @@ router.post('/:id/run-lottery', requireAdmin, async (req, res) => {
 
     return res.json({
       ok: true, invited: inviteCount, waitlist: waitlistCount, priorityInvited: priorityCount,
-      // Only set when Admin/Exec entrants alone outnumbered capacity - the
+      // Only set when priority entrants alone outnumbered capacity - the
       // admin UI can use this to call out the unusual case instead of it
       // passing silently in a plain invited/waitlist count.
       capacityExceededByPriority: priorityCount > capacity ? priorityCount - capacity : 0,
+      birthYearPriority: event.birth_year_priority || null,
     });
   } catch (err) {
     await client.query('ROLLBACK');
@@ -490,14 +525,25 @@ router.post('/:id/push-updates', requireAdmin, async (req, res) => {
 // admin UI can show whether the latest change has been pushed to the portal.
 router.get('/:id/signups', requireAdmin, async (req, res) => {
   try {
+    const { rows: evRows } = await db.query('SELECT birth_year_priority FROM events WHERE event_id = $1', [req.params.id]);
+    const birthYearPriority = evRows[0]?.birth_year_priority || null;
+
+    // birth_date itself never leaves the server - only a computed match
+    // boolean, and only to Exec Team, since a full birth date is more than
+    // this list needs to expose.
     const { rows } = await db.query(
-      `SELECT s.*, m.email AS member_email, m.full_name AS member_name, m.affiliation
+      `SELECT s.*, m.email AS member_email, m.full_name AS member_name, m.affiliation,
+              m.birth_date, (m.id_photo IS NOT NULL) AS has_id_photo
        FROM signups s JOIN members m ON m.member_id = s.member_id
        WHERE s.event_id = $1
        ORDER BY s.lottery_rank ASC NULLS LAST, s.signed_up_at ASC`,
       [req.params.id]
     );
-    return res.json({ signups: rows });
+    const signups = rows.map(({ birth_date, has_id_photo, ...s }) => {
+      if (!req.member.is_exec_team) return s;
+      return { ...s, hasIdPhoto: has_id_photo, birthYearMatch: hasBirthYearPriority({ birth_date, has_id_photo }, birthYearPriority) };
+    });
+    return res.json({ signups, birthYearPriority });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Internal error' });

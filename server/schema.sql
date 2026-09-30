@@ -269,3 +269,24 @@ CREATE TABLE IF NOT EXISTS instagram_credentials (
   expires_at   TIMESTAMPTZ,
   refreshed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- ── Birth-year verification (birthday tastings) ──────────────────────────────
+-- A member's self-reported birth date, plus an ID photo uploaded to confirm
+-- it, used to grant lottery priority on birthday-themed tastings (1996 now;
+-- 1997/1998 later, just by setting the event field below - no code changes
+-- needed). Stored as TEXT 'YYYY-MM-DD' rather than DATE so the value is never
+-- silently reinterpreted through a timezone on the way in or out - the same
+-- class of bug fixed for event times (see git history). The photo is
+-- sensitive: only Exec Team can read it back (server/routes/members.js), and
+-- it's never included in the general member list or CSV export.
+ALTER TABLE members ADD COLUMN IF NOT EXISTS birth_date TEXT
+  CHECK (birth_date IS NULL OR birth_date ~ '^\d{4}-\d{2}-\d{2}$');
+ALTER TABLE members ADD COLUMN IF NOT EXISTS id_photo BYTEA;
+ALTER TABLE members ADD COLUMN IF NOT EXISTS id_photo_content_type TEXT;
+ALTER TABLE members ADD COLUMN IF NOT EXISTS id_photo_uploaded_at TIMESTAMPTZ;
+
+-- Set on an event to grant automatic lottery priority (the same "always wins"
+-- rule as Admin/Exec) to any Pending entrant whose verified birth_date falls
+-- in this year. NULL (the default) means the event behaves exactly as before
+-- - this is opt-in per event.
+ALTER TABLE events ADD COLUMN IF NOT EXISTS birth_year_priority INTEGER;

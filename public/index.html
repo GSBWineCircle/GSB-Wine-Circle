@@ -214,6 +214,15 @@
       font-size: 14px; font-weight: 600; cursor: pointer;
     }
     .commit-check input { margin-top: 3px; width: 18px; height: 18px; flex: none; accent-color: var(--burgundy); cursor: pointer; }
+    /* Birth-year verification box inside the commit overlay */
+    .birth-year-box {
+      margin: 0 0 16px; padding: 12px 14px; background: var(--cream);
+      border: 1px solid var(--line); border-radius: 6px; font-size: 13px;
+    }
+    .birth-year-box .birth-year-note { margin: 0 0 10px; color: var(--muted); }
+    .birth-year-box input[type=date] { width: 100%; }
+    .birth-year-verified-line { display: flex; align-items: center; gap: 8px; color: var(--ok-border, #2e7d32); font-weight: 600; }
+    #commit-id-photo-preview img { max-width: 100%; max-height: 140px; border-radius: 4px; display: block; }
     /* Calendar */
     .calendar-wrap { background: white; border: 1px solid var(--line); border-radius: 6px; padding: 16px; }
     .cal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; font-weight: 600; font-size: 14px; }
@@ -370,6 +379,24 @@
     <h3>Enter the lottery?</h3>
     <p id="commit-event-name" style="margin-bottom:8px;font-weight:600"></p>
     <p class="commit-terms" id="commit-terms"></p>
+
+    <div id="commit-birth-year-section" class="birth-year-box" style="display:none">
+      <div id="commit-birth-year-verified" style="display:none"></div>
+      <div id="commit-birth-year-form" style="display:none">
+        <p class="birth-year-note" id="commit-birth-year-note"></p>
+        <label class="small" for="commit-birth-date" style="display:block;margin-bottom:4px;">Your birth date</label>
+        <input type="date" id="commit-birth-date" />
+        <label class="small" for="commit-id-photo" style="display:block;margin:10px 0 4px;">Photo of your ID</label>
+        <input type="file" id="commit-id-photo" accept="image/*" onchange="onCommitIdPhotoChosen()" />
+        <div id="commit-id-photo-preview" style="margin-top:8px;"></div>
+        <p class="small" style="margin-top:10px;color:var(--muted);">
+          Optional. Used only to confirm your birth year for this tasting's priority drawing, viewable only by
+          Exec Team, and deleted after the event. You can still enter the lottery without this.
+        </p>
+        <div id="commit-birth-year-err" class="err"></div>
+      </div>
+    </div>
+
     <label class="commit-check" for="commit-checkbox">
       <input type="checkbox" id="commit-checkbox" onchange="onCommitToggle()" />
       <span>I commit to attending this event if I win a spot.</span>
@@ -620,13 +647,18 @@
       var dollarLine = (ev.show_dollar_value && ev.dollar_value != null)
         ? '<div class="meta">Value: $' + esc(Number(ev.dollar_value).toFixed(2)) + '</div>'
         : '';
+      var birthYearLine = ev.birth_year_priority
+        ? '<div class="meta">🎂 Born in ' + esc(ev.birth_year_priority) + '? Verify when you enter for priority entry.</div>'
+        : '';
       return '<div class="card">' +
         '<h3>' + esc(ev.name) + statusPill + '</h3>' +
         (meta ? '<div class="meta">' + esc(meta) + '</div>' : '') +
         dollarLine +
+        birthYearLine +
         (ev.description ? '<div class="desc">' + esc(ev.description) + '</div>' : '') +
         '<button class="btn" ' + btnDisabled + ' data-id="' + esc(ev.event_id) + '"' +
           ' data-event-name="' + esc(ev.name) + '" data-event-date="' + esc(ev.event_date || '') + '"' +
+          ' data-birth-year-priority="' + esc(ev.birth_year_priority || '') + '"' +
           ' onclick="openCommitOverlay(this)">' +
           esc(btnLabel) +
         '</button>' +
@@ -937,7 +969,23 @@
   // confirm button calls signUp() below.
   var pendingSignupBtn = null;
 
-  function openCommitOverlay(btn) {
+  // Member's own birth-year verification status (fetched lazily - most
+  // events never need it). null = not yet fetched this session.
+  var myBirthInfo = null;
+
+  async function loadMyBirthInfo() {
+    if (myBirthInfo) return myBirthInfo;
+    try {
+      myBirthInfo = await apiFetch('GET', '/members/me/birth-info');
+    } catch (e) {
+      myBirthInfo = { birth_date: null, has_id_photo: false };
+    }
+    return myBirthInfo;
+  }
+
+  var commitIdPhotoData = null; // { dataUrl, contentType } once a photo is chosen and resized
+
+  async function openCommitOverlay(btn) {
     pendingSignupBtn = btn;
     var name = btn.getAttribute('data-event-name') || 'this event';
     var date = btn.getAttribute('data-event-date');
@@ -957,6 +1005,33 @@
     var box = document.getElementById('commit-checkbox');
     box.checked = false;
     document.getElementById('commit-confirm-btn').disabled = true;
+    commitIdPhotoData = null;
+    document.getElementById('commit-id-photo').value = '';
+    document.getElementById('commit-id-photo-preview').innerHTML = '';
+    setErr('commit-birth-year-err', '');
+
+    var birthYear = btn.getAttribute('data-birth-year-priority');
+    var section = document.getElementById('commit-birth-year-section');
+    if (birthYear) {
+      section.style.display = 'block';
+      document.getElementById('commit-birth-year-verified').style.display = 'none';
+      document.getElementById('commit-birth-year-form').style.display = 'none';
+      var info = await loadMyBirthInfo();
+      var infoYear = info.birth_date ? parseInt(info.birth_date.slice(0, 4), 10) : null;
+      if (infoYear === parseInt(birthYear, 10) && info.has_id_photo) {
+        document.getElementById('commit-birth-year-verified').style.display = 'block';
+        document.getElementById('commit-birth-year-verified').innerHTML =
+          '<div class="birth-year-verified-line">✓ You\'re verified as born in ' + esc(birthYear) + ' — you\'ll get priority entry.</div>';
+      } else {
+        document.getElementById('commit-birth-year-form').style.display = 'block';
+        document.getElementById('commit-birth-year-note').textContent =
+          'This tasting gives priority entry to members born in ' + birthYear + ', confirmed by ID photo.';
+        document.getElementById('commit-birth-date').value = info.birth_date || '';
+      }
+    } else {
+      section.style.display = 'none';
+    }
+
     document.getElementById('commit-overlay').style.display = 'flex';
     box.focus();
   }
@@ -964,15 +1039,91 @@
   function closeCommitOverlay() {
     document.getElementById('commit-overlay').style.display = 'none';
     pendingSignupBtn = null;
+    commitIdPhotoData = null;
+  }
+
+  // Downscale+recompress in the browser before upload - a phone photo of an
+  // ID can be 5-10MB straight off the camera; nothing here needs more detail
+  // than this.
+  function resizeImageFile(file, maxDim, quality) {
+    return new Promise(function (resolve, reject) {
+      var img = new Image();
+      var url = URL.createObjectURL(file);
+      img.onload = function () {
+        URL.revokeObjectURL(url);
+        var scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+        var w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+        var canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        resolve({ dataUrl: canvas.toDataURL('image/jpeg', quality), contentType: 'image/jpeg' });
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); reject(new Error('Could not read that image.')); };
+      img.src = url;
+    });
+  }
+
+  async function onCommitIdPhotoChosen() {
+    var input = document.getElementById('commit-id-photo');
+    var preview = document.getElementById('commit-id-photo-preview');
+    setErr('commit-birth-year-err', '');
+    commitIdPhotoData = null;
+    var file = input.files && input.files[0];
+    if (!file) { preview.innerHTML = ''; return; }
+    if (!/^image\//.test(file.type)) {
+      setErr('commit-birth-year-err', 'Please choose an image file.');
+      input.value = '';
+      return;
+    }
+    preview.innerHTML = '<span class="small">Processing photo…</span>';
+    try {
+      commitIdPhotoData = await resizeImageFile(file, 1600, 0.82);
+      preview.innerHTML = '<img src="' + commitIdPhotoData.dataUrl + '" alt="ID preview" />';
+    } catch (e) {
+      setErr('commit-birth-year-err', e.message || 'Could not process that image.');
+      preview.innerHTML = '';
+    }
   }
 
   function onCommitToggle() {
     document.getElementById('commit-confirm-btn').disabled = !document.getElementById('commit-checkbox').checked;
   }
 
-  function confirmCommit() {
+  async function confirmCommit() {
     if (!document.getElementById('commit-checkbox').checked || !pendingSignupBtn) return;
     var btn = pendingSignupBtn;
+    setErr('commit-birth-year-err', '');
+
+    // If the birth-year form is showing (not already verified) and the
+    // member filled in anything, save it before entering the lottery. This
+    // field is entirely optional - leaving both blank just skips straight to
+    // signUp() below - but if they DID fill something in and it fails to
+    // save (bad date, bad photo), stop and show it rather than silently
+    // entering them without the priority they thought they were getting.
+    // Clearing the field(s) and trying again skips it instead of fixing it.
+    var formVisible = document.getElementById('commit-birth-year-form').style.display !== 'none';
+    if (formVisible) {
+      var dateVal = document.getElementById('commit-birth-date').value;
+      if (dateVal || commitIdPhotoData) {
+        var confirmBtn = document.getElementById('commit-confirm-btn');
+        confirmBtn.disabled = true;
+        try {
+          var payload = {};
+          if (dateVal) payload.birth_date = dateVal;
+          if (commitIdPhotoData) {
+            payload.id_photo_base64 = commitIdPhotoData.dataUrl;
+            payload.id_photo_content_type = commitIdPhotoData.contentType;
+          }
+          await apiFetch('PATCH', '/members/me/birth-info', payload);
+          myBirthInfo = null; // stale now - refetch next time it's needed
+        } catch (e) {
+          confirmBtn.disabled = false;
+          setErr('commit-birth-year-err', (e.message || 'Could not save your birth info.') + ' Clear the field(s) above to enter the lottery without priority instead.');
+          return;
+        }
+      }
+    }
+
     closeCommitOverlay();
     signUp(btn);
   }

@@ -17,6 +17,10 @@ const {
   classifyFinalizeSignups,
   isMemberBlocked,
   canManualAddToEvent,
+  isValidBirthDateInput,
+  isValidBirthYear,
+  extractBirthYear,
+  hasBirthYearPriority,
 } = require('../services/signupLogic');
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -582,5 +586,95 @@ describe('canManualAddToEvent — Exec Team manual-add override', () => {
     expect(canManualAddToEvent(openEvent, okMember, { status: 'Dropped' }).ok).toBe(true);
     expect(canManualAddToEvent(openEvent, okMember, { status: 'Flaked' }).ok).toBe(true);
     expect(canManualAddToEvent(openEvent, okMember, { status: 'Lost' }).ok).toBe(true);
+  });
+});
+
+// ─── Birth-year verification ────────────────────────────────────────────────
+
+describe('isValidBirthDateInput', () => {
+  test('accepts a real past date', () => {
+    expect(isValidBirthDateInput('1996-03-14')).toBe(true);
+  });
+
+  test('accepts today, rejects tomorrow', () => {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    expect(isValidBirthDateInput(todayStr)).toBe(true);
+    const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    expect(isValidBirthDateInput(tomorrow)).toBe(false);
+  });
+
+  test('rejects wrong format', () => {
+    expect(isValidBirthDateInput('03/14/1996')).toBe(false);
+    expect(isValidBirthDateInput('1996-3-14')).toBe(false);
+    expect(isValidBirthDateInput('')).toBe(false);
+    expect(isValidBirthDateInput(null)).toBe(false);
+    expect(isValidBirthDateInput(undefined)).toBe(false);
+  });
+
+  test('rejects calendar-invalid dates instead of silently rolling over', () => {
+    expect(isValidBirthDateInput('1996-02-30')).toBe(false);
+    expect(isValidBirthDateInput('1996-13-01')).toBe(false);
+    expect(isValidBirthDateInput('1996-00-10')).toBe(false);
+  });
+
+  test('rejects absurdly old dates', () => {
+    expect(isValidBirthDateInput('1899-12-31')).toBe(false);
+    expect(isValidBirthDateInput('1900-01-01')).toBe(true);
+  });
+});
+
+describe('isValidBirthYear', () => {
+  test('accepts plausible past birth years', () => {
+    expect(isValidBirthYear(1996)).toBe(true);
+    expect(isValidBirthYear('1998')).toBe(true);
+    expect(isValidBirthYear(1900)).toBe(true);
+  });
+
+  test('rejects non-integers, out-of-range and future years', () => {
+    expect(isValidBirthYear(1899)).toBe(false);
+    expect(isValidBirthYear(new Date().getUTCFullYear() + 1)).toBe(false);
+    expect(isValidBirthYear('abc')).toBe(false);
+    expect(isValidBirthYear(1996.5)).toBe(false);
+    expect(isValidBirthYear(null)).toBe(false);
+  });
+});
+
+describe('extractBirthYear', () => {
+  test('extracts the year from a valid string', () => {
+    expect(extractBirthYear('1996-03-14')).toBe(1996);
+  });
+
+  test('returns null for missing or malformed input', () => {
+    expect(extractBirthYear(null)).toBeNull();
+    expect(extractBirthYear(undefined)).toBeNull();
+    expect(extractBirthYear('')).toBeNull();
+    expect(extractBirthYear('not-a-date')).toBeNull();
+    expect(extractBirthYear(1996)).toBeNull(); // must be the string form, not a number
+  });
+});
+
+describe('hasBirthYearPriority', () => {
+  test('true only when both the birth year matches AND an ID photo is on file', () => {
+    expect(hasBirthYearPriority({ birth_date: '1996-03-14', has_id_photo: true }, 1996)).toBe(true);
+  });
+
+  test('false: matching year but no ID photo (self-report alone is not confirmation)', () => {
+    expect(hasBirthYearPriority({ birth_date: '1996-03-14', has_id_photo: false }, 1996)).toBe(false);
+  });
+
+  test('false: photo on file but year does not match', () => {
+    expect(hasBirthYearPriority({ birth_date: '1995-03-14', has_id_photo: true }, 1996)).toBe(false);
+  });
+
+  test('false: event has no birth-year priority configured', () => {
+    expect(hasBirthYearPriority({ birth_date: '1996-03-14', has_id_photo: true }, null)).toBe(false);
+  });
+
+  test('false: no birth date on file at all', () => {
+    expect(hasBirthYearPriority({ birth_date: null, has_id_photo: true }, 1996)).toBe(false);
+  });
+
+  test('false: member is null/undefined', () => {
+    expect(hasBirthYearPriority(null, 1996)).toBe(false);
   });
 });

@@ -162,6 +162,61 @@ function canManualAddToEvent(event, member, existingSignup) {
   return { ok: true };
 }
 
+// ── Birth-year verification (birthday tastings) ─────────────────────────────
+
+/**
+ * Validate a member-submitted birth date string ('YYYY-MM-DD'): a real
+ * calendar date, not in the future, and not absurdly old.
+ * @param {string} value
+ * @returns {boolean}
+ */
+function isValidBirthDateInput(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [y, m, d] = value.split('-').map(Number);
+  if (y < 1900) return false;
+  const asUTC = new Date(Date.UTC(y, m - 1, d));
+  // Catches both malformed calendar dates (e.g. month 13, Feb 30) and the
+  // Date constructor's own overflow rollover (e.g. day 32 -> next month).
+  if (asUTC.getUTCFullYear() !== y || asUTC.getUTCMonth() !== m - 1 || asUTC.getUTCDate() !== d) return false;
+  return asUTC.getTime() <= Date.now();
+}
+
+/**
+ * Validate a birth-year priority value for an event: a plausible birth year,
+ * not in the future.
+ * @param {number|string} value
+ * @returns {boolean}
+ */
+function isValidBirthYear(value) {
+  const y = Number(value);
+  return Number.isInteger(y) && y >= 1900 && y <= new Date().getUTCFullYear();
+}
+
+/**
+ * The calendar year of a 'YYYY-MM-DD' birth date string, or null.
+ * @param {string|null} birthDate
+ * @returns {number|null}
+ */
+function extractBirthYear(birthDate) {
+  const m = typeof birthDate === 'string' ? /^(\d{4})-\d{2}-\d{2}$/.exec(birthDate) : null;
+  return m ? parseInt(m[1], 10) : null;
+}
+
+/**
+ * Whether a member qualifies for an event's birth-year lottery priority.
+ * Requires BOTH a matching birth year AND an ID photo on file - a
+ * self-reported date alone isn't "confirmation". No targetYear (event opts
+ * out) always returns false.
+ *
+ * @param {{birth_date: string|null, has_id_photo: boolean}} member
+ * @param {number|null} targetYear
+ * @returns {boolean}
+ */
+function hasBirthYearPriority(member, targetYear) {
+  if (!targetYear || !member || !member.has_id_photo) return false;
+  return extractBirthYear(member.birth_date) === targetYear;
+}
+
 module.exports = {
   computeBalance,
   determineDeclineOutcome,
@@ -171,4 +226,8 @@ module.exports = {
   classifyFinalizeSignups,
   isMemberBlocked,
   canManualAddToEvent,
+  isValidBirthDateInput,
+  isValidBirthYear,
+  extractBirthYear,
+  hasBirthYearPriority,
 };

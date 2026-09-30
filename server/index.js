@@ -73,7 +73,10 @@ app.use(cors({
   credentials: true,
 }));
 
-app.use(express.json());
+// Raised from Express's 100kb default so a member's ID-photo upload (sent as
+// base64 JSON) fits; a hard byte cap on the decoded image itself is still
+// enforced in server/routes/members.js.
+app.use(express.json({ limit: '10mb' }));
 app.use(cookieParser());
 
 // ── Rate limiting ─────────────────────────────────────────────────────────────
