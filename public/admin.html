@@ -1656,6 +1656,7 @@ async function loadEventSignups(eventId) {
           <div class="td-actions">
             ${s.status === 'Waitlist' ? `<button class="btn-secondary btn-sm" onclick="promoteSignup('${s.signup_id}')">Promote</button>` : ''}
             ${s.status === 'Invited' ? `<button class="btn-secondary btn-sm" onclick="demoteSignup('${s.signup_id}')">Remove from Invited</button>` : ''}
+            ${s.status === 'Invited' && currentMember?.is_exec_team ? `<button class="btn-danger btn-sm" onclick="markDropped('${s.signup_id}', '${esc(s.member_name).replace(/'/g, '&#39;')}')">Mark Dropped (waive fee)</button>` : ''}
             ${s.status === 'Pending' && currentMember?.is_exec_team ? `<button class="btn-danger btn-sm" onclick="removeFromLottery('${s.signup_id}', '${esc(s.member_name).replace(/'/g, '&#39;')}')">Remove from lottery</button>` : ''}
           </div>
         </td>
@@ -1874,6 +1875,27 @@ async function demoteSignup(signupId) {
       toast('Error: ' + e.message, 'error');
     }
   });
+}
+
+// Exec-only override: mark a lottery winner as a clean Dropped even within
+// the normal grace window, waiving what would otherwise be a Flaked no-show
+// fee - for admin-judged exceptions (emergencies, the club's own mistake).
+async function markDropped(signupId, name) {
+  confirm(
+    'Mark as Dropped (waive fee)',
+    `Mark ${name} as Dropped instead of a late decline? This skips the no-show fee entirely, even if it's within the usual grace window. ` +
+    `If auto-promotion is on for this event, the next waitlisted member will be invited to fill the spot.`,
+    'btn-danger',
+    async () => {
+      try {
+        const res = await api('POST', `/signups/${signupId}/mark-dropped`);
+        toast('Marked Dropped, no fee charged' + (res.promoted ? ' — next waitlisted member promoted' : ''), 'success');
+        await loadEventSignups(currentEventId);
+      } catch (e) {
+        toast('Error: ' + e.message, 'error');
+      }
+    }
+  );
 }
 
 async function eventAction(action) {

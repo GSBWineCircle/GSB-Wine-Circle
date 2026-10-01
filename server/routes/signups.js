@@ -416,6 +416,56 @@ router.post('/:id/demote', requireAdmin, async (req, res) => {
   }
 });
 
+// POST /api/signups/:id/mark-dropped — Exec Team: mark a lottery winner as a
+// clean Dropped (no fee), bypassing the normal decline-timing rule that would
+// otherwise charge a late decline inside the grace window as a Flake. For
+// administrative exceptions - a genuine emergency, a scheduling mistake on
+// the club's end, etc. - where charging the fee wouldn't be fair, without
+// having to change the grace-window setting for everyone. The outcome is
+// exactly what a member's own on-time decline would produce: Dropped, no
+// charge, and the next waitlisted member (if auto-invite is on) promoted.
+router.post('/:id/mark-dropped', requireAdmin, requireExecTeam, async (req, res) => {
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: existing } = await client.query(
+      `SELECT s.*, e.auto_invite_enabled
+       FROM signups s JOIN events e ON e.event_id = s.event_id
+       WHERE s.signup_id = $1 FOR UPDATE OF s`,
+      [req.params.id]
+    );
+    if (!existing.length) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Signup not found' }); }
+    const s = existing[0];
+    if (s.status !== 'Invited') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Only a currently Invited signup can be marked dropped this way.' });
+    }
+
+    await client.query(
+      `UPDATE signups SET status = 'Dropped', member_visible_status = 'Dropped', declined_at = NOW()
+       WHERE signup_id = $1`,
+      [req.params.id]
+    );
+
+    let promoted = null;
+    if (s.auto_invite_enabled) {
+      promoted = await promoteNextWaitlist(client, s.event_id, req.params.id);
+    }
+
+    await client.query('COMMIT');
+    await audit(req.member.email, 'MarkDroppedByExec', 'signups', req.params.id,
+      { status: 'Invited' },
+      { status: 'Dropped', waivedFlakeFee: true, promoted: promoted ? promoted.signup_id : null });
+    return res.json({ ok: true, promoted: !!promoted });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error(err);
+    res.status(500).json({ error: 'Internal error' });
+  } finally {
+    client.release();
+  }
+});
+
 // POST /api/signups/:id/remove-from-lottery — Exec Team: take a member out of
 // an event's lottery before it is run. Only a Pending signup on an event that
 // hasn't been lotteried can be removed; the row is deleted (the full row is
