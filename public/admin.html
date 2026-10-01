@@ -177,6 +177,13 @@
     .ov-events-wrap td, .ov-events-wrap th { padding: 6px 10px; font-size: 12px; }
     .ov-events-wrap td:not(:first-child), .ov-events-wrap th:not(:first-child) { text-align: right; white-space: nowrap; }
 
+    /* Reviews: rating distribution bars */
+    .rating-bar-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; font-size: 12px; }
+    .rating-bar-label { width: 26px; flex: none; color: var(--muted); }
+    .rating-bar-track { flex: 1; background: var(--bg); border-radius: 4px; height: 10px; overflow: hidden; }
+    .rating-bar-fill { height: 100%; background: #d9a441; border-radius: 4px; }
+    .rating-bar-count { width: 24px; flex: none; text-align: right; color: var(--muted); }
+
     /* Column resizing (Chromium supports resize on table cells; other browsers
        just ignore it and the column stays fixed — a harmless no-op there). */
     th.col-resizable { resize: horizontal; overflow: auto; min-width: 60px; }
@@ -527,6 +534,9 @@
         </div>
         <div class="nav-item" data-page="analytics" id="nav-analytics" style="display:none;" onclick="nav('analytics')">
           <span class="nav-icon">📊</span> Analytics
+        </div>
+        <div class="nav-item" data-page="reviews" onclick="nav('reviews')">
+          <span class="nav-icon">⭐</span> Reviews
         </div>
         <hr class="nav-divider" />
         <div class="nav-item" data-page="audit" onclick="nav('audit')">
@@ -943,6 +953,36 @@
           </table>
         </div>
         <div class="pagination" id="email-log-pagination"></div>
+      </div>
+
+      <!-- ── Reviews Page ────────────────────────────────────────────────── -->
+      <div id="page-reviews" class="page">
+        <div class="page-header">
+          <h2>Reviews</h2>
+        </div>
+        <p class="text-muted" style="font-size:13px;margin:-10px 0 16px;">
+          Anonymous 1-5 ratings and optional comments members can leave after attending an event. Reviews
+          carry no identifying information - there is no way to see who submitted which one.
+        </p>
+
+        <div class="analytics-overview" id="reviews-overview"></div>
+
+        <h3 class="an-heading">All Reviews</h3>
+        <div class="toolbar">
+          <select id="reviews-event-filter" onchange="renderReviewsList()">
+            <option value="">All Events</option>
+          </select>
+        </div>
+        <div class="card table-wrap">
+          <table>
+            <thead>
+              <tr><th style="width:200px">Event</th><th style="width:90px">Rating</th><th>Comment</th><th style="width:170px">Submitted</th></tr>
+            </thead>
+            <tbody id="reviews-tbody">
+              <tr class="loading-row"><td colspan="4"><span class="spinner"></span> Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <!-- ── Settings Page ───────────────────────────────────────────────── -->
@@ -1448,6 +1488,102 @@ function nav(page) {
   if (page === 'settings')   loadSettings();
   if (page === 'welcome-photos') loadWelcomePhotos();
   if (page === 'analytics')  loadAnalytics();
+  if (page === 'reviews')    loadReviews();
+}
+
+/* ── Reviews ──────────────────────────────────────────────────────────────── */
+let reviewsData = null; // { overall, events, reviews }
+
+async function loadReviews() {
+  const tbody = document.getElementById('reviews-tbody');
+  tbody.innerHTML = '<tr class="loading-row"><td colspan="4"><span class="spinner"></span> Loading…</td></tr>';
+  document.getElementById('reviews-overview').innerHTML = '';
+  try {
+    reviewsData = await api('GET', '/reviews/dashboard');
+
+    const sel = document.getElementById('reviews-event-filter');
+    const current = sel.value;
+    sel.innerHTML = '<option value="">All Events</option>' +
+      reviewsData.events.map(e => `<option value="${esc(e.event_id)}">${esc(e.name)} (${e.count})</option>`).join('');
+    sel.value = reviewsData.events.some(e => e.event_id === current) ? current : '';
+
+    renderReviewsOverview();
+    renderReviewsList();
+  } catch (e) {
+    tbody.innerHTML = `<tr class="loading-row"><td colspan="4" class="text-danger">Error: ${esc(e.message)}</td></tr>`;
+  }
+}
+
+function renderStarString(rating) {
+  return '★'.repeat(rating) + '☆'.repeat(5 - rating);
+}
+
+function renderReviewsOverview() {
+  const el = document.getElementById('reviews-overview');
+  if (!reviewsData || !reviewsData.overall.count) {
+    el.innerHTML = '<p class="text-muted" style="font-size:13px;">No reviews yet.</p>';
+    return;
+  }
+  const { overall, events } = reviewsData;
+  const card = (v, l) => `<div class="stat-card"><div class="stat-value">${v}</div><div class="stat-label">${l}</div></div>`;
+
+  const maxBucket = Math.max(1, ...Object.values(overall.distribution));
+  const bars = [5, 4, 3, 2, 1].map(star => {
+    const n = overall.distribution[star] || 0;
+    const pct = Math.round((n / maxBucket) * 100);
+    return `<div class="rating-bar-row">
+      <span class="rating-bar-label">${star}★</span>
+      <div class="rating-bar-track"><div class="rating-bar-fill" style="width:${pct}%"></div></div>
+      <span class="rating-bar-count">${n}</span>
+    </div>`;
+  }).join('');
+
+  const topEvents = [...events].sort((a, b) => b.count - a.count).slice(0, 8);
+  const eventRows = topEvents.map(e => `
+    <tr>
+      <td style="font-weight:600;">${esc(e.name)}</td>
+      <td>${e.count}</td>
+      <td>${e.avgRating.toFixed(1)} ${renderStarString(Math.round(e.avgRating))}</td>
+    </tr>`).join('');
+
+  el.innerHTML = `
+    <div class="ov-cards" style="grid-template-columns:repeat(3,1fr);">
+      ${card(overall.count, 'Total Reviews')}
+      ${card(overall.avgRating.toFixed(2) + ' / 5', 'Average Rating')}
+      ${card(events.length, 'Events Reviewed')}
+    </div>
+    <div class="ov-cols">
+      <div class="card card-body">
+        <h3 class="an-heading">Rating Distribution</h3>
+        ${bars}
+      </div>
+      <div class="card card-body">
+        <h3 class="an-heading">Most-Reviewed Events</h3>
+        <table style="width:100%;"><tbody>${eventRows}</tbody></table>
+      </div>
+    </div>`;
+}
+
+function renderReviewsList() {
+  const tbody = document.getElementById('reviews-tbody');
+  if (!reviewsData) return;
+  const eventId = document.getElementById('reviews-event-filter').value;
+  const eventNames = {};
+  reviewsData.events.forEach(e => { eventNames[e.event_id] = e.name; });
+
+  const rows = eventId ? reviewsData.reviews.filter(r => r.event_id === eventId) : reviewsData.reviews;
+  if (!rows.length) {
+    tbody.innerHTML = '<tr class="loading-row"><td colspan="4" style="color:var(--muted)">No reviews yet.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map(r => `
+    <tr>
+      <td>${esc(eventNames[r.event_id] || '(deleted event)')}</td>
+      <td style="color:#d9a441;white-space:nowrap;">${renderStarString(r.rating)}</td>
+      <td>${r.comment ? esc(r.comment) : '<span class="text-muted">No comment</span>'}</td>
+      <td class="text-muted" style="font-size:12px">${fmtDateTime(r.created_at)}</td>
+    </tr>
+  `).join('');
 }
 
 /* ── Welcome Photos (Instagram) ──────────────────────────────────────────── */

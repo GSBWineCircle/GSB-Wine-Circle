@@ -290,3 +290,26 @@ ALTER TABLE members ADD COLUMN IF NOT EXISTS id_photo_uploaded_at TIMESTAMPTZ;
 -- in this year. NULL (the default) means the event behaves exactly as before
 -- - this is opt-in per event.
 ALTER TABLE events ADD COLUMN IF NOT EXISTS birth_year_priority INTEGER;
+
+-- ── Anonymous event reviews ───────────────────────────────────────────────────
+-- event_reviews carries no member_id at all - by design, it is not linkable
+-- to who wrote it. event_review_submissions is a SEPARATE table that only
+-- records "this member reviewed this event" (used to require attendance and
+-- block a second review from the same person); application code never joins
+-- it against event_reviews, so knowing who submitted a review never reveals
+-- which review is theirs.
+CREATE TABLE IF NOT EXISTS event_reviews (
+  review_id  TEXT PRIMARY KEY,
+  event_id   TEXT NOT NULL REFERENCES events (event_id) ON DELETE CASCADE,
+  rating     SMALLINT NOT NULL CHECK (rating BETWEEN 1 AND 5),
+  comment    TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_event_reviews_event_id ON event_reviews (event_id);
+
+CREATE TABLE IF NOT EXISTS event_review_submissions (
+  event_id   TEXT NOT NULL REFERENCES events (event_id) ON DELETE CASCADE,
+  member_id  TEXT NOT NULL REFERENCES members (member_id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (event_id, member_id)
+);

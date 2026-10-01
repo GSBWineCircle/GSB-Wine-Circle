@@ -20,6 +20,7 @@ const auditRoutes = require('./routes/audit');
 const devRoutes = require('./routes/dev');
 const analyticsRoutes = require('./routes/analytics');
 const instagramRoutes = require('./routes/instagram');
+const reviewsRoutes = require('./routes/reviews');
 
 const path = require('path');
 
@@ -141,6 +142,7 @@ app.use('/api/dev', devRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/welcome-photos', instagramRoutes.publicRouter);
 app.use('/api/instagram', instagramRoutes.adminRouter);
+app.use('/api/reviews', reviewsRoutes);
 
 // ── Static frontend ───────────────────────────────────────────────────────────
 const publicDir = path.join(__dirname, '..', 'public');

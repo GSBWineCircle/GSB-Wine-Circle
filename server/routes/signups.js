@@ -118,12 +118,19 @@ router.get('/invitations', requireAuth, async (req, res) => {
 // GET /api/signups/my — member: all their signups
 router.get('/my', requireAuth, async (req, res) => {
   try {
+    // The join is against THIS member's own submissions only (member_id =
+    // req.member.member_id), so it only ever answers "did I review this
+    // event?" - it's never used to look up anyone else's, and still never
+    // touches event_reviews itself.
     const { rows } = await db.query(
       `SELECT s.signup_id, s.event_id, s.member_visible_status AS status, s.lottery_rank,
               s.signed_up_at, s.invite_sent_at, s.declined_at,
-              e.name AS event_name, e.event_date, e.location
+              e.name AS event_name, e.event_date, e.location,
+              (ers.event_id IS NOT NULL) AS reviewed
        FROM signups s
        JOIN events e ON e.event_id = s.event_id
+       LEFT JOIN event_review_submissions ers
+         ON ers.event_id = s.event_id AND ers.member_id = s.member_id
        WHERE s.member_id = $1
        ORDER BY s.signed_up_at DESC`,
       [req.member.member_id]

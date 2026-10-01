@@ -88,6 +88,18 @@
     .btn.secondary:hover:not(:disabled) { background: #f0e0e2; }
     .btn.danger { background: #b3261e; }
     .btn.danger:hover:not(:disabled) { background: #8c1a14; }
+    .review-btn { margin-top: 8px; font-size: 13px; padding: 6px 12px; }
+    /* Star rating picker */
+    .star-rating { font-size: 32px; line-height: 1; margin: 4px 0 2px; }
+    .star-btn {
+      background: none; border: none; cursor: pointer; padding: 2px;
+      color: #d8cfc0; transition: color .1s; font-size: inherit;
+    }
+    .star-btn:hover, .star-btn.filled { color: #d9a441; }
+    #review-comment {
+      width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 4px;
+      font: inherit; resize: vertical; margin-top: 12px;
+    }
     .pill {
       display: inline-block; padding: 2px 10px; border-radius: 12px;
       font-size: 12px; font-weight: 500; margin-left: 8px; vertical-align: middle;
@@ -437,6 +449,24 @@
   </div>
 </div>
 
+<!-- Anonymous event review overlay -->
+<div id="review-overlay" class="overlay" style="display:none">
+  <div class="overlay-box">
+    <h3>Review this event</h3>
+    <p id="review-event-name" style="margin-bottom:4px;font-weight:600"></p>
+    <p class="small" style="color:var(--muted);margin-bottom:10px;">
+      Your review is anonymous - it isn't linked to your account in any way we can trace back to you.
+    </p>
+    <div class="star-rating" id="review-stars"></div>
+    <textarea id="review-comment" placeholder="Comments (optional)" rows="4" maxlength="2000"></textarea>
+    <div id="review-err" class="err"></div>
+    <div class="overlay-actions">
+      <button class="btn secondary" onclick="closeReviewOverlay()">Cancel</button>
+      <button class="btn" id="review-submit-btn" onclick="submitReview()" disabled>Submit review</button>
+    </div>
+  </div>
+</div>
+
 <!-- Event detail overlay (My history + calendar click-through) -->
 <div id="event-detail-overlay" class="overlay" style="display:none">
   <div class="overlay-box">
@@ -753,9 +783,18 @@
       var label = statusLabel[status] || status;
       var pill = '<span class="pill ' + esc(pillClass) + '">' + esc(label) + '</span>';
       var meta = [fmtDate(it.event_date), it.location].filter(Boolean).join(' · ');
+      var reviewLine = '';
+      if (status === 'Attended') {
+        reviewLine = it.reviewed
+          ? '<div class="meta">✓ You reviewed this event (anonymously)</div>'
+          : '<button class="btn secondary review-btn" data-event-id="' + esc(it.event_id) + '"' +
+            ' data-event-name="' + esc(it.event_name || '') + '"' +
+            ' onclick="event.stopPropagation();openReviewOverlay(this)">⭐ Leave an anonymous review</button>';
+      }
       return '<div class="card history-card" data-event-id="' + esc(it.event_id) + '" onclick="openEventDetail(this.getAttribute(\'data-event-id\'))">' +
         '<h3>' + esc(it.event_name || '(unnamed event)') + pill + '</h3>' +
         (meta ? '<div class="meta">' + esc(meta) + '</div>' : '') +
+        reviewLine +
       '</div>';
     }).join('');
   }
@@ -1216,6 +1255,61 @@
       setErr('birth-verify-err', e.message || 'Could not save your birth info.');
     } finally {
       btn.disabled = false;
+    }
+  }
+
+  // ── Anonymous event review ──────────────────────────────────────────────
+  var reviewEventId = null;
+  var reviewRating = 0;
+
+  function openReviewOverlay(btn) {
+    reviewEventId = btn.getAttribute('data-event-id');
+    reviewRating = 0;
+    document.getElementById('review-event-name').textContent = btn.getAttribute('data-event-name') || 'this event';
+    document.getElementById('review-comment').value = '';
+    setErr('review-err', '');
+    renderReviewStars();
+    document.getElementById('review-submit-btn').disabled = true;
+    document.getElementById('review-overlay').style.display = 'flex';
+  }
+
+  function closeReviewOverlay() {
+    document.getElementById('review-overlay').style.display = 'none';
+    reviewEventId = null;
+  }
+
+  function setReviewRating(n) {
+    reviewRating = n;
+    renderReviewStars();
+    document.getElementById('review-submit-btn').disabled = false;
+  }
+
+  function renderReviewStars() {
+    var html = '';
+    for (var i = 1; i <= 5; i++) {
+      html += '<button type="button" class="star-btn' + (i <= reviewRating ? ' filled' : '') + '"' +
+        ' onclick="setReviewRating(' + i + ')" aria-label="' + i + ' star' + (i > 1 ? 's' : '') + '">★</button>';
+    }
+    document.getElementById('review-stars').innerHTML = html;
+  }
+
+  async function submitReview() {
+    if (!reviewRating || !reviewEventId) return;
+    var btn = document.getElementById('review-submit-btn');
+    btn.disabled = true;
+    setErr('review-err', '');
+    try {
+      await apiFetch('POST', '/reviews', {
+        event_id: reviewEventId,
+        rating: reviewRating,
+        comment: document.getElementById('review-comment').value.trim(),
+      });
+      closeReviewOverlay();
+      alert('Thanks! Your anonymous review has been submitted.');
+      await loadHistory();
+    } catch (e) {
+      btn.disabled = false;
+      setErr('review-err', e.message || 'Could not submit your review.');
     }
   }
 
