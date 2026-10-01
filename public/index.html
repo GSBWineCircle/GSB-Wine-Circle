@@ -408,6 +408,35 @@
   </div>
 </div>
 
+<!-- Add birth-year verification after already signing up (event got a
+     priority year set after the member entered, or they skipped it then) -->
+<div id="birth-verify-overlay" class="overlay" style="display:none">
+  <div class="overlay-box">
+    <h3>Verify your birth year</h3>
+    <p id="birth-verify-event-name" style="margin-bottom:8px;font-weight:600"></p>
+    <div id="birth-verify-already" class="birth-year-box" style="display:none"></div>
+    <div id="birth-verify-form" style="display:none">
+      <div class="birth-year-box">
+        <p class="birth-year-note" id="birth-verify-note"></p>
+        <label class="small" for="birth-verify-date" style="display:block;margin-bottom:4px;">Your birth date</label>
+        <input type="date" id="birth-verify-date" />
+        <label class="small" for="birth-verify-photo" style="display:block;margin:10px 0 4px;">Photo of your ID</label>
+        <input type="file" id="birth-verify-photo" accept="image/*" onchange="onBirthVerifyPhotoChosen()" />
+        <div id="birth-verify-photo-preview" style="margin-top:8px;"></div>
+        <p class="small" style="margin-top:10px;color:var(--muted);">
+          Used only to confirm your birth year for this tasting's priority drawing, viewable only by Exec Team,
+          and deleted after the event.
+        </p>
+      </div>
+      <div id="birth-verify-err" class="err"></div>
+    </div>
+    <div class="overlay-actions">
+      <button class="btn secondary" onclick="closeBirthVerifyOverlay()">Close</button>
+      <button class="btn" id="birth-verify-save-btn" onclick="saveBirthVerify()">Save</button>
+    </div>
+  </div>
+</div>
+
 <!-- Event detail overlay (My history + calendar click-through) -->
 <div id="event-detail-overlay" class="overlay" style="display:none">
   <div class="overlay-box">
@@ -647,8 +676,20 @@
       var dollarLine = (ev.show_dollar_value && ev.dollar_value != null)
         ? '<div class="meta">Value: $' + esc(Number(ev.dollar_value).toFixed(2)) + '</div>'
         : '';
+      // Already signed up before this event got a birth-year priority (or
+      // just never filled in the commit-overlay prompt)? Let them add it
+      // after the fact, as long as the lottery for this event hasn't run yet
+      // - there's no point once it has.
+      var canVerifyAfterSignup = ev.birth_year_priority && alreadyIn && ss === 'Pending'
+        && (ev.status === 'Draft' || ev.status === 'Open' || ev.status === 'Closed');
       var birthYearLine = ev.birth_year_priority
-        ? '<div class="meta">🎂 Born in ' + esc(ev.birth_year_priority) + '? Verify when you enter for priority entry.</div>'
+        ? '<div class="meta">🎂 Born in ' + esc(ev.birth_year_priority) + '? ' +
+          (canVerifyAfterSignup
+            ? '<a href="#" data-id="' + esc(ev.event_id) + '" data-event-name="' + esc(ev.name) + '"' +
+              ' data-birth-year-priority="' + esc(ev.birth_year_priority) + '"' +
+              ' onclick="openBirthVerify(this);return false;">Add proof of birth year for priority entry</a>'
+            : 'Verify when you enter for priority entry.') +
+          '</div>'
         : '';
       return '<div class="card">' +
         '<h3>' + esc(ev.name) + statusPill + '</h3>' +
@@ -1082,6 +1123,99 @@
     } catch (e) {
       setErr('commit-birth-year-err', e.message || 'Could not process that image.');
       preview.innerHTML = '';
+    }
+  }
+
+  // Standalone "add verification after the fact" overlay - for a member who
+  // already signed up for an event before it got a birth-year priority (or
+  // who skipped the prompt at signup time). No lottery entry happens here,
+  // just an update to the member's own birth-info record.
+  var birthVerifyPhotoData = null;
+
+  async function openBirthVerify(link) {
+    var eventName = link.getAttribute('data-event-name') || 'this event';
+    var birthYear = link.getAttribute('data-birth-year-priority');
+    document.getElementById('birth-verify-event-name').textContent = eventName;
+    setErr('birth-verify-err', '');
+    birthVerifyPhotoData = null;
+    document.getElementById('birth-verify-photo').value = '';
+    document.getElementById('birth-verify-photo-preview').innerHTML = '';
+
+    var already = document.getElementById('birth-verify-already');
+    var form = document.getElementById('birth-verify-form');
+    var saveBtn = document.getElementById('birth-verify-save-btn');
+    already.style.display = 'none';
+    form.style.display = 'none';
+    saveBtn.style.display = '';
+
+    var info = await loadMyBirthInfo();
+    var infoYear = info.birth_date ? parseInt(info.birth_date.slice(0, 4), 10) : null;
+    if (infoYear === parseInt(birthYear, 10) && info.has_id_photo) {
+      already.style.display = 'block';
+      already.innerHTML = '<div class="birth-year-verified-line">✓ You\'re already verified as born in ' +
+        esc(birthYear) + ' — you have priority entry for this tasting.</div>';
+      saveBtn.style.display = 'none';
+    } else {
+      form.style.display = 'block';
+      document.getElementById('birth-verify-note').textContent =
+        'This tasting gives priority entry to members born in ' + birthYear + ', confirmed by ID photo.';
+      document.getElementById('birth-verify-date').value = info.birth_date || '';
+    }
+
+    document.getElementById('birth-verify-overlay').style.display = 'flex';
+  }
+
+  function closeBirthVerifyOverlay() {
+    document.getElementById('birth-verify-overlay').style.display = 'none';
+    birthVerifyPhotoData = null;
+  }
+
+  async function onBirthVerifyPhotoChosen() {
+    var input = document.getElementById('birth-verify-photo');
+    var preview = document.getElementById('birth-verify-photo-preview');
+    setErr('birth-verify-err', '');
+    birthVerifyPhotoData = null;
+    var file = input.files && input.files[0];
+    if (!file) { preview.innerHTML = ''; return; }
+    if (!/^image\//.test(file.type)) {
+      setErr('birth-verify-err', 'Please choose an image file.');
+      input.value = '';
+      return;
+    }
+    preview.innerHTML = '<span class="small">Processing photo…</span>';
+    try {
+      birthVerifyPhotoData = await resizeImageFile(file, 1600, 0.82);
+      preview.innerHTML = '<img src="' + birthVerifyPhotoData.dataUrl + '" alt="ID preview" />';
+    } catch (e) {
+      setErr('birth-verify-err', e.message || 'Could not process that image.');
+      preview.innerHTML = '';
+    }
+  }
+
+  async function saveBirthVerify() {
+    var dateVal = document.getElementById('birth-verify-date').value;
+    if (!dateVal && !birthVerifyPhotoData) {
+      setErr('birth-verify-err', 'Add a birth date and/or a photo first.');
+      return;
+    }
+    setErr('birth-verify-err', '');
+    var btn = document.getElementById('birth-verify-save-btn');
+    btn.disabled = true;
+    try {
+      var payload = {};
+      if (dateVal) payload.birth_date = dateVal;
+      if (birthVerifyPhotoData) {
+        payload.id_photo_base64 = birthVerifyPhotoData.dataUrl;
+        payload.id_photo_content_type = birthVerifyPhotoData.contentType;
+      }
+      await apiFetch('PATCH', '/members/me/birth-info', payload);
+      myBirthInfo = null; // stale - refetch next time it's needed
+      closeBirthVerifyOverlay();
+      alert('Saved. If your birth date and ID photo are on file and match, you\'ll get priority entry.');
+    } catch (e) {
+      setErr('birth-verify-err', e.message || 'Could not save your birth info.');
+    } finally {
+      btn.disabled = false;
     }
   }
 
