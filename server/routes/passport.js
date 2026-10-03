@@ -6,6 +6,7 @@ const { v4: uuidv4 } = require('uuid');
 const db = require('../db');
 const { requireAuth, requireAdmin } = require('../middleware/auth');
 const { audit } = require('../services/audit');
+const { isPassportEnabledFor } = require('../services/passportAccess');
 const { buildStamp, abridgeDescription } = require('../services/passportStamp');
 const { researchWine, findBottleImage } = require('../services/wineResearch');
 const { normalizeTag, ruleBasedSuggestions } = require('../services/wineTags');
@@ -243,8 +244,21 @@ async function sharedTagCounts(wineIds, includeHidden, excludeMemberId) {
   return out;
 }
 
+// Member endpoints are limited to PASSPORT_ALLOWED_EMAILS while the feature is
+// being polished (see services/passportAccess.js). 404, not 403, so it looks
+// like the feature doesn't exist for everyone else.
+function requirePassportAccess(req, res, next) {
+  if (!isPassportEnabledFor(req.member.email)) return res.status(404).json({ error: 'Not found' });
+  next();
+}
+
+// GET /api/passport/enabled — lets the portal decide whether to show the button
+memberRouter.get('/enabled', requireAuth, (req, res) => {
+  res.json({ enabled: isPassportEnabledFor(req.member.email) });
+});
+
 // GET /api/passport — the caller's passport: events they attended + their notes
-memberRouter.get('/', requireAuth, async (req, res) => {
+memberRouter.get('/', requireAuth, requirePassportAccess, async (req, res) => {
   try {
     const { rows: events } = await db.query(
       `SELECT e.event_id, e.name, e.event_date, e.location, e.description
@@ -289,7 +303,7 @@ memberRouter.get('/', requireAuth, async (req, res) => {
 });
 
 // PUT /api/passport/wines/:wineId/note — save the caller's rating/notes/tags for a wine
-memberRouter.put('/wines/:wineId/note', requireAuth, async (req, res) => {
+memberRouter.put('/wines/:wineId/note', requireAuth, requirePassportAccess, async (req, res) => {
   const input = sanitizeNoteInput(req.body);
   if (input.error) return res.status(400).json({ error: input.error });
   try {

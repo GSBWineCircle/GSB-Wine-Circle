@@ -348,7 +348,7 @@
     <h1 id="home-org-name">Wine Circle</h1>
     <div style="display:flex;align-items:center;gap:4px">
       <span class="who" id="who"></span>
-      <button onclick="openPassport()">Passport</button>
+      <button id="passport-btn" style="display:none" onclick="openPassport()">Passport</button>
       <a href="/admin" id="admin-link" class="admin-link" style="display:none" onclick="return goToAdmin();">Admin</a>
       <button onclick="logout()">Log out</button>
     </div>
@@ -589,6 +589,11 @@
     document.getElementById('who').textContent = member.full_name || member.email;
     document.getElementById('admin-link').style.display = member.is_admin ? '' : 'none';
     refreshHome();
+    // Passport is limited to an allowlist for now; the server decides.
+    document.getElementById('passport-btn').style.display = 'none';
+    apiFetch('GET', '/passport/enabled').then(function (r) {
+      document.getElementById('passport-btn').style.display = r.enabled ? '' : 'none';
+    }).catch(function () {});
   }
 
   function setView(id) {
