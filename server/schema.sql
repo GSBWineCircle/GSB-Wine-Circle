@@ -321,7 +321,7 @@ CREATE TABLE IF NOT EXISTS event_review_submissions (
 --
 -- event_wines: the optional wine list an admin enters on the event page.
 -- suggested_tags are the tasting-note suggestions for the wine (from web
--- research when an Anthropic key is configured, otherwise from grape/style
+-- research when a Gemini API key is configured, otherwise from grape/style
 -- rules - see server/services/wineResearch.js). The bottle image is stored in
 -- the DB like welcome_photos; when none is stored the member UI draws a
 -- representative bottle for the wine's style.
