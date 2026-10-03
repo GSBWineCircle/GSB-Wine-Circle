@@ -77,7 +77,31 @@ describe('wineResearch', () => {
     expect(init.headers['x-goog-api-key']).toBe('k');
     expect(JSON.parse(init.body).tools).toEqual([{ google_search: {} }]);
   });
-  test('HTTP error (e.g. quota), network error, junk and too-few tags all fall back to rules', async () => {
+  test('tries the next model when one fails, remembers the one that works', async () => {
+    research._resetWorkingModel();
+    const spy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const ok = gem('["a1","b2","c3","d4","e5"]');
+    const fetch = jest.fn(async url => (/gemini-2\.5-flash:/.test(url) ? { ok: false, status: 404, json: async () => ({}) } : ok));
+    const r = await research.suggestTags(wine, { fetch, apiKey: 'k' });
+    expect(r.source).toBe('web');
+    expect(fetch.mock.calls.map(c => c[0].match(/models\/([^:]+):/)[1])).toEqual(['gemini-2.5-flash', 'gemini-2.5-flash-lite']);
+    fetch.mockClear();
+    await research.suggestTags(wine, { fetch, apiKey: 'k' });
+    expect(fetch.mock.calls[0][0]).toMatch(/gemini-2\.5-flash-lite:/); // remembered
+    spy.mockRestore();
+    research._resetWorkingModel();
+  });
+  test('if no model offers grounding, the last attempt runs ungrounded and is labelled model', async () => {
+    research._resetWorkingModel();
+    const spy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const fetch = jest.fn(async (url, init) => (JSON.parse(init.body).tools ? { ok: false, status: 400, json: async () => ({}) } : gem('["a1","b2","c3","d4","e5"]')));
+    const r = await research.suggestTags(wine, { fetch, apiKey: 'k' });
+    spy.mockRestore();
+    expect(r.source).toBe('model');
+    expect(fetch.mock.calls[fetch.mock.calls.length - 1][0]).toMatch(/gemini-flash-latest:/);
+    research._resetWorkingModel();
+  });
+  test('quota error, network error, junk and too-few tags everywhere fall back to rules', async () => {
     for (const fetch of [
       jest.fn().mockResolvedValue({ ok: false, status: 429, json: async () => ({}) }),
       jest.fn().mockRejectedValue(new Error('boom')),
@@ -85,6 +109,7 @@ describe('wineResearch', () => {
       jest.fn().mockResolvedValue(gem('["one","two"]')),
       jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ candidates: [] }) }),
     ]) {
+      research._resetWorkingModel();
       const spy = jest.spyOn(console, 'error').mockImplementation(() => {});
       const r = await research.suggestTags(wine, { fetch, apiKey: 'k' });
       spy.mockRestore();
