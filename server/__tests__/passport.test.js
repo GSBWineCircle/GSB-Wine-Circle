@@ -60,38 +60,33 @@ describe('passportStamp', () => {
 
 describe('wineResearch', () => {
   const wine = { name: 'Pommard', grape: 'Pinot Noir', region: 'Burgundy', country: 'France' };
-  const reply = (stop_reason, text) => ({ stop_reason, content: [{ type: 'text', text }] });
+  const gem = text => ({ ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text }] } }] }) });
 
-  test('no client -> rule-based', async () => {
-    delete process.env.ANTHROPIC_API_KEY;
+  test('no key -> rule-based', async () => {
+    delete process.env.GEMINI_API_KEY;
     const r = await research.suggestTags(wine);
     expect(r.source).toBe('rules');
     expect(r.tags.length).toBeGreaterThan(0);
   });
-  test('parses a model reply wrapped in prose/fences', async () => {
-    const client = { messages: { create: jest.fn().mockResolvedValue(reply('end_turn', 'Here:\n```json\n["Dark Cherry","earthy","silk","violet","forest floor"]\n```')) } };
-    const r = await research.suggestTags(wine, { client });
+  test('parses a reply wrapped in prose/fences, sends key header and search tool', async () => {
+    const fetch = jest.fn().mockResolvedValue(gem('Here:\n```json\n["Dark Cherry","earthy","silk","violet","forest floor"]\n```'));
+    const r = await research.suggestTags(wine, { fetch, apiKey: 'k' });
     expect(r).toEqual({ tags: ['dark cherry', 'earthy', 'silk', 'violet', 'forest floor'], source: 'web' });
-    expect(client.messages.create.mock.calls[0][0].tools[0].type).toBe('web_search_20260209');
+    const [url, init] = fetch.mock.calls[0];
+    expect(url).toMatch(/generativelanguage\.googleapis\.com.*:generateContent$/);
+    expect(init.headers['x-goog-api-key']).toBe('k');
+    expect(JSON.parse(init.body).tools).toEqual([{ google_search: {} }]);
   });
-  test('continues through pause_turn by re-sending the assistant content', async () => {
-    const paused = { stop_reason: 'pause_turn', content: [{ type: 'server_tool_use', id: 's' }] };
-    const create = jest.fn().mockResolvedValueOnce(paused).mockResolvedValueOnce(reply('end_turn', '["a1","b2","c3","d4","e5"]'));
-    const r = await research.suggestTags(wine, { client: { messages: { create } } });
-    expect(r.source).toBe('web');
-    const second = create.mock.calls[1][0].messages;
-    expect(second.length).toBe(2);
-    expect(second[1]).toEqual({ role: 'assistant', content: paused.content });
-  });
-  test('refusal, API error, junk and too-few tags all fall back to rules', async () => {
-    for (const create of [
-      jest.fn().mockResolvedValue(reply('refusal', '')),
+  test('HTTP error (e.g. quota), network error, junk and too-few tags all fall back to rules', async () => {
+    for (const fetch of [
+      jest.fn().mockResolvedValue({ ok: false, status: 429, json: async () => ({}) }),
       jest.fn().mockRejectedValue(new Error('boom')),
-      jest.fn().mockResolvedValue(reply('end_turn', 'no json here')),
-      jest.fn().mockResolvedValue(reply('end_turn', '["one","two"]')),
+      jest.fn().mockResolvedValue(gem('no json here')),
+      jest.fn().mockResolvedValue(gem('["one","two"]')),
+      jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ candidates: [] }) }),
     ]) {
       const spy = jest.spyOn(console, 'error').mockImplementation(() => {});
-      const r = await research.suggestTags(wine, { client: { messages: { create } } });
+      const r = await research.suggestTags(wine, { fetch, apiKey: 'k' });
       spy.mockRestore();
       expect(r.source).toBe('rules');
     }

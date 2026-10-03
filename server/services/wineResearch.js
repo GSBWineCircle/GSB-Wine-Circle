@@ -1,9 +1,9 @@
 /**
  * Wine research for the passport: tasting-note suggestions and a bottle image.
  *
- * Suggestions: when ANTHROPIC_API_KEY is set, Claude researches the wine with
- * the server-side web_search tool and returns descriptor tags. On ANY failure
- * (no key, API error, refusal, unparseable reply) we fall back to rule-based
+ * Suggestions: when GEMINI_API_KEY is set, Gemini (Google AI Studio free tier)
+ * researches the wine with Google Search grounding and returns descriptor tags.
+ * On ANY failure (no key, quota/API error, unparseable reply) we fall back to rule-based
  * suggestions, so saving a wine list never fails because research did.
  *
  * Image: best-effort lookup on Wikimedia Commons (openly licensed) with strict
@@ -16,19 +16,10 @@
 
 const { normalizeTagList, ruleBasedSuggestions, inferStyle, MAX_SUGGESTED_TAGS } = require('./wineTags');
 
-const MODEL = process.env.PASSPORT_RESEARCH_MODEL || 'claude-opus-5-5';
-const MAX_PAUSE_TURNS = 4;
-
-let sdkClient = null;
-function getClient() {
-  if (!process.env.ANTHROPIC_API_KEY) return null;
-  if (!sdkClient) {
-    const mod = require('@anthropic-ai/sdk');
-    const Anthropic = mod.default || mod.Anthropic || mod;
-    sdkClient = new Anthropic();
-  }
-  return sdkClient;
-}
+// Google AI Studio (Gemini API) free tier. Grounding with Google Search is free
+// on the 2.5 models (500 requests/day), not on the 3.x models, hence the default.
+const MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const GEMINI_URL = m => `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`;
 
 function describeWine(w) {
   return [w.producer, w.name, w.vintage, w.grape && `(${w.grape})`, [w.region, w.country].filter(Boolean).join(', ')]
@@ -40,8 +31,7 @@ function parseTagsFromText(text) {
   const m = String(text || '').match(/\[[\s\S]*\]/);
   if (!m) return [];
   try {
-    const arr = JSON.parse(m[0]);
-    return normalizeTagList(arr, MAX_SUGGESTED_TAGS);
+    return normalizeTagList(JSON.parse(m[0]), MAX_SUGGESTED_TAGS);
   } catch (_) {
     return [];
   }
@@ -49,38 +39,35 @@ function parseTagsFromText(text) {
 
 /**
  * @param {object} wine
- * @param {{client?: object}} [opts] client is injectable for tests
+ * @param {{fetch?: Function, apiKey?: string}} [opts] injectable for tests
  * @returns {Promise<{tags: string[], source: 'web'|'rules'}>}
  */
 async function suggestTags(wine, opts = {}) {
   const fallback = () => ({ tags: ruleBasedSuggestions(wine), source: 'rules' });
-  const client = opts.client || getClient();
-  if (!client) return fallback();
+  const apiKey = opts.apiKey || process.env.GEMINI_API_KEY;
+  if (!apiKey) return fallback();
+  const fetchImpl = opts.fetch || global.fetch;
 
   try {
-    const messages = [{
-      role: 'user',
-      content:
-        `Research this wine online and list the tasting descriptors critics and producers use for it: ${describeWine(wine)}.\n` +
-        `Reply with ONLY a JSON array of 8 to 10 short lowercase descriptor tags (1-3 words each, e.g. "dark cherry", ` +
-        `"cedar", "silky tannins") covering aromas, flavours and texture. No prose.`,
-    }];
-    let response;
-    for (let turn = 0; turn <= MAX_PAUSE_TURNS; turn++) {
-      response = await client.messages.create({
-        model: MODEL,
-        max_tokens: 4000,
-        output_config: { effort: 'medium' },
-        tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 3 }],
-        messages,
-      });
-      if (response.stop_reason !== 'pause_turn') break;
-      // The server paused a long-running turn: re-send as-is to let it continue.
-      messages.push({ role: 'assistant', content: response.content });
-    }
-    if (response.stop_reason === 'refusal' || response.stop_reason === 'pause_turn') return fallback();
-
-    const text = (response.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n');
+    const prompt =
+      `Research this wine online and list the tasting descriptors critics and producers use for it: ${describeWine(wine)}.\n` +
+      `Reply with ONLY a JSON array of 8 to 10 short lowercase descriptor tags (1-3 words each, e.g. "dark cherry", ` +
+      `"cedar", "silky tannins") covering aromas, flavours and texture. No prose.`;
+    // Search grounding can't be combined with a forced JSON response mode, so
+    // the reply is parsed out of plain text instead.
+    const resp = await fetchImpl(GEMINI_URL(MODEL), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        tools: [{ google_search: {} }],
+      }),
+      signal: AbortSignal.timeout(30000),
+    });
+    if (!resp.ok) throw new Error(`Gemini HTTP ${resp.status}`);
+    const data = await resp.json();
+    const cand = (data.candidates || [])[0];
+    const text = ((cand && cand.content && cand.content.parts) || []).map(p => p.text || '').join('\n');
     const tags = parseTagsFromText(text);
     // Too few usable tags means the research didn't really work - prefer the rules.
     if (tags.length < 4) return fallback();
