@@ -318,6 +318,18 @@
     .action-group-label { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
     .action-group-danger .action-group-label { color: var(--danger); }
     .action-group-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+    /* Passport wine list editor */
+    .pw-row { border: 1px solid var(--border, #e5e7eb); border-radius: 8px; padding: 12px; margin-bottom: 10px; background: #fff; }
+    .pw-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+    .pw-grid label { display: block; font-size: 11px; font-weight: 600; color: var(--muted); margin-bottom: 2px; }
+    .pw-grid input, .pw-grid select { width: 100%; }
+    .pw-meta { display: flex; gap: 12px; align-items: flex-start; margin-top: 10px; flex-wrap: wrap; }
+    .pw-thumb { width: 44px; height: 70px; object-fit: contain; background: #f3f4f6; border-radius: 4px; }
+    .pw-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+    .pw-tag { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: #f3f4f6; color: #374151; }
+    .pw-tag.shared { background: #fdf2f4; color: #5a1827; cursor: pointer; }
+    .pw-tag.shared.hidden { text-decoration: line-through; opacity: .55; }
+    .pw-rowhead { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 12px; color: var(--muted); }
     .section-title { font-size: 14px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 12px; margin-top: 20px; }
 
     /* ── Loading state ────────────────────────────────────────────────────── */
@@ -679,6 +691,23 @@
               <input type="checkbox" id="toggle-visible-before-open" onchange="toggleEventSetting('visible_before_open', this.checked)" />
               <span class="toggle-slider"></span>
             </label>
+          </div>
+        </div>
+
+        <!-- Passport: wine list for this event -->
+        <div class="section-title">Passport — Wine List <span style="text-transform:none;letter-spacing:0;font-weight:400;">(optional)</span></div>
+        <div class="card card-body" id="passport-card" style="margin-bottom:20px;">
+          <p style="font-size:13px;color:var(--muted);margin-bottom:12px;">
+            List the wines poured at this event. After the event, members who attended see it in their Passport
+            with an auto-generated stamp and summary, and can rate each wine and add tasting notes. Tasting-note
+            suggestions are researched automatically when you save; a bottle photo is looked up if one is freely
+            available, otherwise an illustrated bottle is shown (or upload your own).
+          </p>
+          <div id="pw-list"><span class="spinner"></span></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
+            <button class="btn-secondary btn-sm" onclick="pwAdd()">+ Add Wine</button>
+            <button class="btn-primary btn-sm" id="pw-save" onclick="pwSave()">Save Wine List</button>
+            <span id="pw-status" style="font-size:12px;color:var(--muted);align-self:center;"></span>
           </div>
         </div>
 
@@ -1659,6 +1688,177 @@ async function saveWelcomePhotos() {
   }
 }
 
+/* ── Passport wine list ──────────────────────────────────────────────────── */
+let pwWines = [];
+let pwLoadedFor = null;
+let pwPollTimers = [];
+
+function pwReadForm() {
+  // Pull edits out of the inputs back into pwWines before any re-render/save.
+  document.querySelectorAll('#pw-list .pw-row').forEach((row, i) => {
+    const w = pwWines[i]; if (!w) return;
+    row.querySelectorAll('[data-f]').forEach(el => { w[el.dataset.f] = el.value; });
+  });
+}
+
+function pwRender() {
+  const box = document.getElementById('pw-list');
+  if (!pwWines.length) { box.innerHTML = '<div style="font-size:13px;color:var(--muted);">No wines listed for this event.</div>'; return; }
+  const styles = ['red', 'white', 'rose', 'sparkling', 'dessert', 'fortified'];
+  const field = (i, f, label, ph) => `<div><label>${label}</label><input type="text" data-f="${f}" maxlength="120" placeholder="${ph || ''}" value="${esc(pwWines[i][f] || '')}"></div>`;
+  box.innerHTML = pwWines.map((w, i) => `
+    <div class="pw-row">
+      <div class="pw-rowhead">
+        <strong>Wine ${i + 1}</strong>
+        <span>
+          <button class="btn-secondary btn-sm" ${i === 0 ? 'disabled' : ''} onclick="pwMove(${i},-1)" aria-label="Move up">↑</button>
+          <button class="btn-secondary btn-sm" ${i === pwWines.length - 1 ? 'disabled' : ''} onclick="pwMove(${i},1)" aria-label="Move down">↓</button>
+          <button class="btn-danger btn-sm" onclick="pwRemove(${i})">Remove</button>
+        </span>
+      </div>
+      <div class="pw-grid">
+        ${field(i, 'name', 'Wine name *', 'e.g. Gevrey-Chambertin')}
+        ${field(i, 'producer', 'Producer', 'e.g. Domaine Fourrier')}
+        ${field(i, 'vintage', 'Vintage', '2019')}
+        ${field(i, 'grape', 'Grape(s)', 'Pinot Noir')}
+        ${field(i, 'region', 'Region', 'Burgundy')}
+        ${field(i, 'country', 'Country', 'France')}
+        <div><label>Style</label><select data-f="style"><option value="">Auto-detect</option>${styles.map(st => `<option value="${st}" ${w.style === st ? 'selected' : ''}>${st[0].toUpperCase() + st.slice(1)}</option>`).join('')}</select></div>
+      </div>
+      ${w.wine_id ? `
+      <div class="pw-meta">
+        ${w.image_url ? `<img class="pw-thumb" src="${esc(w.image_url)}" alt="">` : '<div class="pw-thumb" title="No photo - an illustrated bottle is shown"></div>'}
+        <div style="flex:1;min-width:200px;">
+          <div style="font-size:11px;font-weight:600;color:var(--muted);">Suggested tasting tags (${w.tags_source === 'web' ? 'from web research' : 'from grape/style'})</div>
+          <div class="pw-tags">${(w.suggested_tags || []).map(t => `<span class="pw-tag">${esc(t)}</span>`).join('') || '<span style="font-size:12px;color:var(--muted);">None yet</span>'}</div>
+          ${(w.shared_tags || []).length ? `
+          <div style="font-size:11px;font-weight:600;color:var(--muted);margin-top:8px;">Tags members chose to share (click to hide/unhide)</div>
+          <div class="pw-tags">${w.shared_tags.map(t => `<span class="pw-tag shared ${t.hidden ? 'hidden' : ''}" onclick="pwToggleTag(${i},'${esc(t.tag).replace(/'/g, '&#39;')}',${!t.hidden})">${esc(t.tag)} · ${t.count}</span>`).join('')}</div>` : ''}
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          <button class="btn-secondary btn-sm" onclick="pwResearch(${i})">↻ Re-research</button>
+          <label class="btn-secondary btn-sm" style="cursor:pointer;margin:0;">Upload photo<input type="file" accept="image/jpeg,image/png,image/webp" style="display:none" onchange="pwUpload(${i}, this)"></label>
+          ${w.image_url ? `<button class="btn-secondary btn-sm" onclick="pwRemoveImage(${i})">Remove photo</button>` : ''}
+        </div>
+      </div>` : '<div style="font-size:12px;color:var(--muted);margin-top:8px;">Save to research tasting notes and find a bottle photo.</div>'}
+    </div>`).join('');
+}
+
+async function loadPassportWines(eventId) {
+  pwPollTimers.forEach(clearTimeout); pwPollTimers = [];
+  pwLoadedFor = eventId;
+  document.getElementById('pw-status').textContent = '';
+  try {
+    const r = await api('GET', `/passport/admin/events/${eventId}/wines`);
+    if (pwLoadedFor !== eventId) return;
+    pwWines = r.wines;
+    pwRender();
+  } catch (e) {
+    document.getElementById('pw-list').innerHTML = `<div style="font-size:13px;color:var(--danger,#b91c1c);">Couldn't load the wine list: ${esc(e.message)}</div>`;
+  }
+}
+
+function pwAdd() {
+  pwReadForm();
+  if (pwWines.length >= 30) return toast('At most 30 wines per event.', 'error');
+  pwWines.push({ name: '', producer: '', vintage: '', grape: '', region: '', country: '', style: '' });
+  pwRender();
+  const rows = document.querySelectorAll('#pw-list .pw-row');
+  rows[rows.length - 1].querySelector('input').focus();
+}
+function pwMove(i, d) {
+  pwReadForm();
+  const j = i + d; if (j < 0 || j >= pwWines.length) return;
+  [pwWines[i], pwWines[j]] = [pwWines[j], pwWines[i]];
+  pwRender();
+}
+function pwRemove(i) {
+  pwReadForm();
+  const w = pwWines[i];
+  const doIt = () => { pwWines.splice(i, 1); pwRender(); };
+  if (w.wine_id) {
+    confirm('Remove wine', `Remove "${w.name || 'this wine'}" from the list? When you save, members' ratings and notes on it are deleted too.`, 'btn-danger', doIt);
+  } else doIt();
+}
+
+async function pwSave() {
+  pwReadForm();
+  if (pwWines.some(w => !String(w.name || '').trim())) return toast('Every wine needs a name.', 'error');
+  const btn = document.getElementById('pw-save');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  const eventId = currentEventId;
+  try {
+    const r = await api('PUT', `/passport/admin/events/${eventId}/wines`, {
+      wines: pwWines.map(w => ({ wine_id: w.wine_id, name: w.name, producer: w.producer, vintage: w.vintage,
+                                  region: w.region, country: w.country, grape: w.grape, style: w.style })),
+    });
+    pwWines = r.wines;
+    pwRender();
+    toast('Wine list saved.', 'success');
+    if (r.researching) {
+      document.getElementById('pw-status').textContent = 'Researching tasting notes and bottle photos… this updates automatically.';
+      // Research runs in the background; refresh a couple of times to pick it up.
+      [8000, 25000, 60000].forEach(ms => pwPollTimers.push(setTimeout(async () => {
+        if (currentEventId !== eventId) return;
+        const keep = document.querySelector('#pw-list input:focus, #pw-list select:focus');
+        if (keep) return; // don't clobber an edit in progress
+        await loadPassportWines(eventId);
+        document.getElementById('pw-status').textContent = ms === 60000 ? '' : document.getElementById('pw-status').textContent;
+      }, ms)));
+    }
+  } catch (e) {
+    toast('Error: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Save Wine List';
+  }
+}
+
+async function pwResearch(i) {
+  pwReadForm();
+  const w = pwWines[i];
+  if (!w.wine_id) return toast('Save the wine list first.', 'error');
+  toast('Researching… this can take up to a minute. (Edits to this wine need Save first.)');
+  try {
+    const r = await api('POST', `/passport/admin/wines/${w.wine_id}/research`);
+    pwWines[i] = { ...w, ...r.wine };
+    pwRender();
+    toast('Updated.', 'success');
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function pwToggleTag(i, tag, hide) {
+  try {
+    await api('PUT', `/passport/admin/wines/${pwWines[i].wine_id}/hidden-tags`, { tag, hidden: hide });
+    pwReadForm();
+    const t = pwWines[i].shared_tags.find(x => x.tag === tag);
+    if (t) t.hidden = hide;
+    pwRender();
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+function pwUpload(i, input) {
+  const file = input.files[0]; if (!file) return;
+  if (file.size > 3 * 1024 * 1024) { input.value = ''; return toast('Photo is too large (3 MB max).', 'error'); }
+  const reader = new FileReader();
+  reader.onload = async () => {
+    try {
+      await api('PUT', `/passport/admin/wines/${pwWines[i].wine_id}/image`, { image_base64: reader.result, content_type: file.type });
+      toast('Photo uploaded.', 'success');
+      pwReadForm();
+      await loadPassportWines(currentEventId);
+    } catch (e) { toast('Error: ' + e.message, 'error'); }
+  };
+  reader.readAsDataURL(file);
+}
+
+async function pwRemoveImage(i) {
+  try {
+    await api('PUT', `/passport/admin/wines/${pwWines[i].wine_id}/image`, { image_base64: null });
+    pwReadForm();
+    await loadPassportWines(currentEventId);
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
 /* ── Tabs ────────────────────────────────────────────────────────────────── */
 function switchTab(tab) {
   document.querySelectorAll('#page-event-detail .tab-item').forEach((t, i) => {
@@ -1746,6 +1946,7 @@ async function openEventDetail(eventId) {
     document.getElementById('btn-delete-event').style.display = currentMember?.is_exec_team ? '' : 'none';
     document.getElementById('btn-manual-add').style.display = currentMember?.is_exec_team ? '' : 'none';
 
+    loadPassportWines(eventId);
     await loadEventSignups(eventId);
   } catch (e) {
     toast('Failed to load event: ' + e.message, 'error');

@@ -21,6 +21,7 @@ const devRoutes = require('./routes/dev');
 const analyticsRoutes = require('./routes/analytics');
 const instagramRoutes = require('./routes/instagram');
 const reviewsRoutes = require('./routes/reviews');
+const passportRoutes = require('./routes/passport');
 
 const path = require('path');
 
@@ -143,6 +144,9 @@ app.use('/api/analytics', analyticsRoutes);
 app.use('/api/welcome-photos', instagramRoutes.publicRouter);
 app.use('/api/instagram', instagramRoutes.adminRouter);
 app.use('/api/reviews', reviewsRoutes);
+app.use('/api/passport/admin', passportRoutes.adminRouter);
+app.use('/api/passport', passportRoutes.memberRouter);
+app.use('/api/passport-images', passportRoutes.imageRouter);
 
 // ── Static frontend ───────────────────────────────────────────────────────────
 const publicDir = path.join(__dirname, '..', 'public');

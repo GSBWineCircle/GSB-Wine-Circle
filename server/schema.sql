@@ -313,3 +313,56 @@ CREATE TABLE IF NOT EXISTS event_review_submissions (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   PRIMARY KEY (event_id, member_id)
 );
+
+-- ── Wine Circle Passport ──────────────────────────────────────────────────────
+-- All NEW tables (nothing added to existing ones), so deploying the code before
+-- running this block cannot break any existing page - the passport endpoints
+-- simply error until it is run.
+--
+-- event_wines: the optional wine list an admin enters on the event page.
+-- suggested_tags are the tasting-note suggestions for the wine (from web
+-- research when an Anthropic key is configured, otherwise from grape/style
+-- rules - see server/services/wineResearch.js). The bottle image is stored in
+-- the DB like welcome_photos; when none is stored the member UI draws a
+-- representative bottle for the wine's style.
+CREATE TABLE IF NOT EXISTS event_wines (
+  wine_id            TEXT PRIMARY KEY,
+  event_id           TEXT NOT NULL REFERENCES events (event_id) ON DELETE CASCADE,
+  position           INTEGER NOT NULL DEFAULT 0,
+  name               TEXT NOT NULL,
+  producer           TEXT NOT NULL DEFAULT '',
+  vintage            TEXT NOT NULL DEFAULT '',
+  region             TEXT NOT NULL DEFAULT '',
+  country            TEXT NOT NULL DEFAULT '',
+  grape              TEXT NOT NULL DEFAULT '',
+  style              TEXT NOT NULL DEFAULT 'red',  -- red | white | rose | sparkling | dessert | fortified
+  suggested_tags     JSONB NOT NULL DEFAULT '[]'::jsonb,
+  tags_source        TEXT NOT NULL DEFAULT 'rules', -- rules | web
+  image              BYTEA,
+  image_content_type TEXT,
+  image_source       TEXT NOT NULL DEFAULT '',      -- attribution/URL for a looked-up image
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_event_wines_event_id ON event_wines (event_id, position);
+
+-- A member's own rating and tasting notes for one wine. share_tags opts that
+-- member's custom tags into the anonymous "what others tasted" list.
+CREATE TABLE IF NOT EXISTS member_wine_notes (
+  member_id   TEXT NOT NULL REFERENCES members (member_id) ON DELETE CASCADE,
+  wine_id     TEXT NOT NULL REFERENCES event_wines (wine_id) ON DELETE CASCADE,
+  rating      SMALLINT CHECK (rating IS NULL OR rating BETWEEN 1 AND 5),
+  note        TEXT NOT NULL DEFAULT '',
+  tags        JSONB NOT NULL DEFAULT '[]'::jsonb,
+  share_tags  BOOLEAN NOT NULL DEFAULT FALSE,
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (member_id, wine_id)
+);
+CREATE INDEX IF NOT EXISTS idx_member_wine_notes_wine ON member_wine_notes (wine_id);
+
+-- Admin moderation: a shared tag listed here is never shown to other members.
+CREATE TABLE IF NOT EXISTS wine_hidden_tags (
+  wine_id TEXT NOT NULL REFERENCES event_wines (wine_id) ON DELETE CASCADE,
+  tag     TEXT NOT NULL,
+  PRIMARY KEY (wine_id, tag)
+);

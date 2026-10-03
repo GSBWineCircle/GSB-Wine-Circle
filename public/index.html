@@ -5,8 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Wine Circle</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E%F0%9F%8D%B7%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/passport.css">
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Caprasimo&family=Figtree:wght@400;500;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Caprasimo&family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Figtree:wght@400;500;600;700&display=swap');
     :root {
       --burgundy: #6b1f2c;
       --burgundy-dark: #4a1520;
@@ -303,12 +304,51 @@
   </div>
 </div>
 
+<!-- PASSPORT VIEW (styles: /passport.css, logic: /passport.js) -->
+<div id="view-passport" class="view">
+  <div id="pp-banner" role="alert"></div>
+  <section id="pp-cover">
+    <button type="button" class="pp-exit" onclick="closePassport()">← Back</button>
+    <div class="pp-book" id="pp-book" role="button" tabindex="0" aria-label="Open your Wine Circle passport">
+      <div class="pp-cover-top"><small>Stanford GSB</small><h1>Wine Circle<span>Passport</span></h1></div>
+      <svg class="pp-crest" viewBox="0 0 120 120" aria-hidden="true">
+        <g fill="none" stroke="#b08d57" stroke-width="1">
+          <circle cx="60" cy="60" r="56"/><circle cx="60" cy="60" r="50" stroke-opacity=".5"/>
+          <circle cx="49" cy="56" r="6.2"/><circle cx="62" cy="56" r="6.2"/><circle cx="75" cy="56" r="6.2"/>
+          <circle cx="55.5" cy="67.5" r="6.2"/><circle cx="68.5" cy="67.5" r="6.2"/><circle cx="62" cy="79" r="6.2"/>
+          <path d="M62 49c-1-10 6-17 15-16-1 8-6 14-15 16Z"/><path d="M62 49c0-7-3-12-8-14"/>
+        </g>
+      </svg>
+      <div class="pp-cover-name" id="pp-cover-name"></div>
+    </div>
+    <button type="button" class="pp-open-btn" id="pp-open-btn">Open passport</button>
+  </section>
+  <main id="pp-app" style="max-width:1040px;padding:36px 14px 60px">
+    <div class="pp-passport">
+      <div class="pp-head">
+        <div><h2 id="pp-head-name">Passport</h2><div class="pp-sub">Wine Circle, Stanford GSB</div></div>
+        <button type="button" class="pp-close" onclick="closePassport()">Close</button>
+      </div>
+      <div class="pp-stats" id="pp-stats"></div>
+      <div class="pp-flags" id="pp-flags"></div>
+      <div class="pp-tabs">
+        <button type="button" class="pp-tab active" data-act="tab" data-id="stamps">Stamps</button>
+        <button type="button" class="pp-tab" data-act="tab" data-id="cellar">Cellar</button>
+      </div>
+      <div id="pp-page"></div>
+    </div>
+  </main>
+  <div id="pp-overlay"><div class="pp-sheet" id="pp-sheet"></div></div>
+  <div id="pp-toast" role="status"></div>
+</div>
+
 <!-- HOME VIEW -->
 <div id="view-home" class="view">
   <header class="wc-header">
     <h1 id="home-org-name">Wine Circle</h1>
     <div style="display:flex;align-items:center;gap:4px">
       <span class="who" id="who"></span>
+      <button onclick="openPassport()">Passport</button>
       <a href="/admin" id="admin-link" class="admin-link" style="display:none" onclick="return goToAdmin();">Admin</a>
       <button onclick="logout()">Log out</button>
     </div>
@@ -1524,5 +1564,6 @@
     else { sendCode(); }
   });
 </script>
+<script src="/passport.js"></script>
 </body>
 </html>
