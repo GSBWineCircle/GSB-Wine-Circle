@@ -154,9 +154,10 @@ describe('passportWines validation', () => {
 
 describe('passportAccess', () => {
   const { isPassportEnabledFor: ok } = require('../services/passportAccess');
-  test('defaults to the maintainer only, case-insensitive', () => {
+  test('defaults to the built-in allowlist, case-insensitive', () => {
     expect(ok('rdighe@stanford.edu', '')).toBe(true);
     expect(ok('RDighe@Stanford.edu', undefined)).toBe(true);
+    expect(ok('rutingl@stanford.edu', '')).toBe(true);
     expect(ok('someone@stanford.edu', '')).toBe(false);
     expect(ok('', '')).toBe(false);
   });
