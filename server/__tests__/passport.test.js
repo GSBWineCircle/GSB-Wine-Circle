@@ -28,6 +28,9 @@ describe('wineTags', () => {
   test('rule suggestions are grape-aware with a style fallback', () => {
     expect(tags.ruleBasedSuggestions({ grape: 'Pinot Noir' })).toContain('red cherry');
     expect(tags.ruleBasedSuggestions({ name: 'Mystery', style: 'white' })).toContain('citrus');
+    // grape beats region: white Burgundy is Chardonnay
+    expect(tags.ruleBasedSuggestions({ grape: 'Chardonnay', region: 'Chablis, Burgundy' })).toContain('green apple');
+    expect(tags.ruleBasedSuggestions({ grape: 'Chardonnay', region: 'Chablis, Burgundy' })).not.toContain('red cherry');
     expect(tags.ruleBasedSuggestions({}).length).toBeGreaterThan(0);
   });
 });

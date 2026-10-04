@@ -107,9 +107,15 @@ const STYLE_TAGS = {
 function ruleBasedSuggestions(wine) {
   const text = [wine.grape, wine.region, wine.name, wine.producer].filter(Boolean).join(' ').toLowerCase();
   const style = STYLES.includes(wine.style) ? wine.style : inferStyle(text);
+  // The grape says more about the taste than the place (white Burgundy is
+  // Chardonnay, not Pinot Noir), so match it first and only then the full text.
   let picked = [];
-  for (const [re, tags] of GRAPE_TAGS) {
-    if (re.test(text)) { picked = tags; break; }
+  for (const haystack of [String(wine.grape || '').toLowerCase(), text]) {
+    if (!haystack) continue;
+    for (const [re, tags] of GRAPE_TAGS) {
+      if (re.test(haystack)) { picked = tags; break; }
+    }
+    if (picked.length) break;
   }
   if (!picked.length) picked = STYLE_TAGS[style] || STYLE_TAGS.red;
   return normalizeTagList(picked, MAX_SUGGESTED_TAGS);
