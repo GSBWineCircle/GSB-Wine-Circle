@@ -8,7 +8,8 @@ const { requireAuth, requireAdmin } = require('../middleware/auth');
 const { audit } = require('../services/audit');
 const { isPassportEnabledFor } = require('../services/passportAccess');
 const { buildStamp, abridgeDescription } = require('../services/passportStamp');
-const { researchWine, findBottleImage } = require('../services/wineResearch');
+const { researchWine, findBottleImage, generateArt } = require('../services/wineResearch');
+const crypto = require('crypto');
 const { normalizeTag, ruleBasedSuggestions } = require('../services/wineTags');
 const {
   MAX_WINES_PER_EVENT, ALLOWED_IMAGE_TYPES, MAX_IMAGE_BYTES,
@@ -61,6 +62,41 @@ async function enrichWine(wineId) {
 // Sequential, so one admin save never fires dozens of simultaneous API calls.
 function enrichInBackground(ids) {
   setImmediate(async () => { for (const id of ids) await enrichWine(id); });
+}
+
+
+// ── Generated stamp icon + summary (cached in event_passport_art) ────────────
+const artKey = (event, wines) => crypto.createHash('sha1').update(
+  [event.name, event.description, event.location, ...(wines || []).map(researchKey)].join('\u0001')).digest('hex');
+const artInFlight = new Set();
+
+// Generate and cache art for one event. Never throws; no-ops without a key.
+async function ensureArt(eventId, { force = false } = {}) {
+  if (artInFlight.has(eventId)) return null;
+  artInFlight.add(eventId);
+  try {
+    const { rows } = await db.query('SELECT event_id, name, description, location FROM events WHERE event_id = $1', [eventId]);
+    if (!rows.length) return null;
+    const wines = await listEventWines(eventId);
+    const key = artKey(rows[0], wines);
+    if (!force) {
+      const { rows: have } = await db.query('SELECT input_hash FROM event_passport_art WHERE event_id = $1', [eventId]);
+      if (have.length && have[0].input_hash === key) return null;
+    }
+    const art = await generateArt(rows[0], wines);
+    if (!art) return null;
+    await db.query(
+      `INSERT INTO event_passport_art (event_id, blurb, motif, input_hash) VALUES ($1,$2,$3,$4)
+       ON CONFLICT (event_id) DO UPDATE SET blurb=EXCLUDED.blurb, motif=EXCLUDED.motif,
+         input_hash=EXCLUDED.input_hash, generated_at=NOW()`,
+      [eventId, art.blurb, art.motif, key]);
+    return art;
+  } catch (err) {
+    console.error('ensureArt failed:', err.message);
+    return null;
+  } finally {
+    artInFlight.delete(eventId);
+  }
 }
 
 async function listEventWines(eventId) {
@@ -139,6 +175,7 @@ adminRouter.put('/events/:eventId/wines', requireAdmin, async (req, res) => {
     await audit(req.member.email, 'passport_wines_saved', 'event_wines', req.params.eventId,
                 { count: existing.length }, { count: clean.length, removed: drop.length });
     enrichInBackground(toEnrich);
+    setImmediate(() => ensureArt(req.params.eventId));
     const wines = await listEventWines(req.params.eventId);
     res.json({ wines: wines.map(wineOut), researching: toEnrich.length });
   } catch (err) {
@@ -157,6 +194,18 @@ adminRouter.post('/wines/:wineId/research', requireAdmin, async (req, res) => {
     const { rows } = await db.query(`SELECT ${WINE_COLS} FROM event_wines WHERE wine_id = $1`, [req.params.wineId]);
     if (!rows.length) return res.status(404).json({ error: 'Wine not found' });
     res.json({ wine: wineOut(rows[0]) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal error' });
+  }
+});
+
+// POST /api/passport/admin/events/:eventId/regenerate-art — redo the stamp icon + summary now
+adminRouter.post('/events/:eventId/regenerate-art', requireAdmin, async (req, res) => {
+  try {
+    const art = await ensureArt(req.params.eventId, { force: true });
+    if (!art) return res.status(503).json({ error: 'Could not generate right now (is GEMINI_API_KEY set, and has the passport art SQL been run?). The rule-based version is used meanwhile.' });
+    res.json({ art });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Internal error' });
@@ -277,6 +326,14 @@ memberRouter.get('/', requireAuth, requirePassportAccess, async (req, res) => {
     ]);
     const noteBy = new Map(notes.map(n => [n.wine_id, n]));
 
+    // Cached generated art; a missing table (SQL not run yet) just means no cache.
+    let artRows = [];
+    try {
+      ({ rows: artRows } = await db.query('SELECT event_id, blurb, motif, input_hash FROM event_passport_art WHERE event_id = ANY($1)', [eventIds]));
+    } catch (_) { /* table not created yet */ }
+    const artBy = new Map(artRows.map(a => [a.event_id, a]));
+    let pending = 0;
+
     const winesByEvent = {};
     wines.forEach(w => {
       const n = noteBy.get(w.wine_id);
@@ -290,11 +347,20 @@ memberRouter.get('/', requireAuth, requirePassportAccess, async (req, res) => {
     res.json({
       events: events.map(e => {
         const ws = winesByEvent[e.event_id] || [];
+        const row = artBy.get(e.event_id);
+        const fresh = row && row.input_hash === artKey(e, ws);
+        if (!fresh && process.env.GEMINI_API_KEY && !artInFlight.has(e.event_id)) {
+          pending++;
+          setImmediate(() => ensureArt(e.event_id));
+        }
+        // A stale row is still better than the rule-based fallback while regenerating.
+        const art = row || null;
         return {
           event_id: e.event_id, name: e.name, event_date: e.event_date, location: e.location,
-          stamp: buildStamp(e, ws), blurb: abridgeDescription(e, ws), wines: ws,
+          stamp: buildStamp(e, ws, art), blurb: art ? art.blurb : abridgeDescription(e, ws), wines: ws,
         };
       }),
+      art_pending: pending > 0,
     });
   } catch (err) {
     console.error(err);

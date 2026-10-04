@@ -366,3 +366,16 @@ CREATE TABLE IF NOT EXISTS wine_hidden_tags (
   tag     TEXT NOT NULL,
   PRIMARY KEY (wine_id, tag)
 );
+
+-- ── Passport: generated stamp icon + summary, cached per event ───────────────
+-- Written by the app (Gemini picks the icon and writes the blurb from the event
+-- details + wine list). input_hash records what it was generated from, so
+-- editing the event or wine list regenerates it. If this table is missing the
+-- passport still works, using the rule-based icon and summary.
+CREATE TABLE IF NOT EXISTS event_passport_art (
+  event_id     TEXT PRIMARY KEY REFERENCES events (event_id) ON DELETE CASCADE,
+  blurb        TEXT NOT NULL,
+  motif        TEXT NOT NULL,
+  input_hash   TEXT NOT NULL,
+  generated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

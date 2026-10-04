@@ -5,7 +5,7 @@
 (function () {
   'use strict';
 
-  var PP = { data: null, loading: false, loadError: '', tab: 'stamps', filter: 'all', eventId: null, wineId: null, draft: null, saving: false, opening: false, uid: 0 };
+  var PP = { tries: 0, retry: null, data: null, loading: false, loadError: '', tab: 'stamps', filter: 'all', eventId: null, wineId: null, draft: null, saving: false, opening: false, uid: 0 };
   var $ = function (id) { return document.getElementById(id); };
 
   // ── Data helpers ──────────────────────────────────────────────────────────
@@ -48,6 +48,10 @@
       case 'HU': body = r(0, 0, 24, 8, C.red) + r(0, 8, 24, 8, C.white) + r(0, 16, 24, 8, C.green); break;
       case 'AR': body = r(0, 0, 24, 8, C.sky) + r(0, 8, 24, 8, C.white) + r(0, 16, 24, 8, C.sky) + '<circle cx="12" cy="12" r="2.2" fill="' + C.yellow + '"/>'; break;
       case 'CL': body = r(0, 0, 24, 12, C.white) + r(0, 12, 24, 12, C.red) + r(0, 0, 10, 12, C.blue); break;
+      case 'ZA': body = r(0, 0, 24, 12, C.red) + r(0, 12, 24, 12, '#2b4a85') +
+        '<path d="M-1 -1L10 12L-1 25M10 12H25" fill="none" stroke="' + C.white + '" stroke-width="7.4"/>' +
+        '<path d="M-1 -1L10 12L-1 25M10 12H25" fill="none" stroke="' + C.green + '" stroke-width="4.2"/>' +
+        '<path d="M0 3.2V20.8L8 12Z" fill="' + C.yellow + '"/><path d="M0 5.8V18.2L5.4 12Z" fill="' + C.black + '"/>'; break;
       case 'PT': body = r(0, 0, 9.6, 24, C.ptgreen) + r(9.6, 0, 14.4, 24, C.red) + '<circle cx="9.6" cy="12" r="3.9" fill="none" stroke="' + C.yellow + '" stroke-width="1.3"/>' + r(8, 10.2, 3.2, 3.6, C.white); break;
       case 'US': {
         var h = 24 / 7, stripes = r(0, 0, 24, 24, C.white), dots = '';
@@ -113,16 +117,33 @@
     barrel: '<g fill="none"><path d="M-16 -20C-26 -8 -26 8 -16 20H16C26 8 26 -8 16 -20Z"/><path d="M-23 -9H23M-23 9H23"/></g>',
     moon: '<path d="M10 -22A22 22 0 1 0 22 10A17 17 0 1 1 10 -22Z" stroke="none"/><circle cx="16" cy="-14" r="2" stroke="none"/>',
     globe: '<g fill="none"><circle cx="0" cy="0" r="20"/><ellipse cx="0" cy="0" rx="9" ry="20"/><path d="M-20 0H20M-17 -10Q0 -4 17 -10M-17 10Q0 4 17 10"/></g>',
+    vineyard: '<g fill="none"><path d="M-26 8Q-10 -8 6 2T28 -2"/><path d="M-26 22Q-8 8 10 14T28 10"/></g><circle cx="12" cy="-16" r="5" stroke="none"/>',
+    volcano: '<g fill="none"><path d="M-24 22L-8 -8H8L24 22Z"/><path d="M0 -12Q-6 -17 0 -21Q6 -25 1 -28"/></g>',
+    chateau: '<g fill="none"><path d="M-22 22V-2H-16V-8H-10V-2H-4V-14H4V-2H10V-8H16V-2H22V22Z"/><path d="M-4 -14L0 -25L4 -14"/><path d="M-5 22V12Q0 6 5 12V22"/></g>',
+    river: '<g fill="none"><path d="M-8 -26C12 -16 -14 -4 4 8S2 18 8 26"/><path d="M2 -26C22 -16 -4 -4 14 8S12 18 18 26"/></g>',
+    palm: '<g fill="none"><path d="M0 22Q-2 6 4 -8"/><path d="M4 -8Q-8 -12 -16 -4M4 -8Q-4 -20 -14 -18M4 -8Q8 -22 18 -18M4 -8Q16 -12 20 -2"/><path d="M-14 22H14"/></g>',
+    olive: '<g fill="none"><path d="M-16 14Q4 4 18 -12"/></g><g stroke="none"><ellipse cx="-10" cy="5" rx="7" ry="3" transform="rotate(-60 -10 5)"/><ellipse cx="-6" cy="15" rx="7" ry="3" transform="rotate(20 -6 15)"/><ellipse cx="2" cy="-6" rx="7" ry="3" transform="rotate(-70 2 -6)"/><ellipse cx="6" cy="6" rx="7" ry="3" transform="rotate(15 6 6)"/><ellipse cx="12" cy="-16" rx="7" ry="3" transform="rotate(-55 12 -16)"/><ellipse cx="17" cy="-4" rx="7" ry="3" transform="rotate(20 17 -4)"/></g>',
+    cypress: '<path d="M0 -26C10 -10 10 8 4 20H-4C-10 8 -10 -10 0 -26Z" stroke="none"/><path d="M-26 24Q-10 16 0 24T26 22" fill="none"/>',
+    pine: '<path d="M0 -26L-12 -6H-5L-15 10H-6L-18 22H18L6 10H15L5 -6H12Z" stroke="none"/><path d="M0 22V28" fill="none"/>',
+    cheese: '<g fill="none"><path d="M-24 16L-24 4L24 -14V16Z"/><circle cx="-8" cy="9" r="2.6"/><circle cx="8" cy="3" r="2.6"/><circle cx="14" cy="11" r="2.2"/></g>',
+    fish: '<g fill="none"><path d="M-24 0C-12 -14 8 -14 16 0C8 14 -12 14 -24 0Z"/><path d="M16 0L26 -10V10Z"/></g><circle cx="-14" cy="-2" r="1.8" stroke="none"/>',
+    cake: '<g fill="none"><path d="M-20 22V6H20V22Z"/><path d="M-20 14Q-10 20 0 14T20 14"/><path d="M-14 6V-4H14V6"/><path d="M-6 -4V-12M6 -4V-12"/></g><path d="M-6 -14Q-9 -18 -6 -21Q-3 -18 -6 -14ZM6 -14Q3 -18 6 -21Q9 -18 6 -14Z" stroke="none"/>',
+    star: '<path d="M0 -24L5.9 -8.1L22.8 -7.4L9.5 3.1L14.1 19.4L0 10L-14.1 19.4L-9.5 3.1L-22.8 -7.4L-5.9 -8.1Z"/>',
+    compass: '<g fill="none"><circle cx="0" cy="0" r="22"/><path d="M0 -22V-17M0 17V22M-22 0H-17M17 0H22"/></g><path d="M9 -9L2 2L-9 9L-2 -2Z" stroke="none"/>',
+    question: '<path d="M-9 -12C-9 -24 11 -24 11 -12C11 -4 0 -4 0 6" fill="none"/><circle cx="0" cy="17" r="2.4" stroke="none"/>',
+    bottle: '<g fill="none"><path d="M-4 -26H4V-12C4 -6 11 -4 11 6V24H-11V6C-11 -4 -4 -6 -4 -12Z"/><path d="M-11 9H11M-11 19H11"/></g>',
+    note: '<g fill="none"><path d="M-6 16V-18L14 -22V10"/><path d="M-6 -10L14 -14"/></g><ellipse cx="-11" cy="16" rx="6" ry="4.5" stroke="none"/><ellipse cx="9" cy="10" rx="6" ry="4.5" stroke="none"/>',
+    book: '<g fill="none"><path d="M0 -14C-8 -18 -18 -18 -24 -16V16C-18 14 -8 14 0 18C8 14 18 14 24 16V-16C18 -18 8 -18 0 -14Z"/><path d="M0 -14V18"/></g>',
+    hourglass: '<g fill="none"><path d="M-12 -22H12C12 -8 2 -2 0 0C2 2 12 8 12 22H-12C-12 8 -2 2 0 0C-2 -2 -12 -8 -12 -22Z"/></g><path d="M-6 19H6L0 11Z" stroke="none"/>',
+    flame: '<path d="M0 24C-14 24 -18 12 -12 2C-10 -4 -4 -8 -2 -24C8 -14 16 -4 14 8C13 18 8 24 0 24Z" fill="none"/><path d="M0 24C-6 24 -8 18 -4 12C-2 8 0 6 0 2C6 8 8 14 6 18C5 22 3 24 0 24Z" stroke="none"/>',
+    crown: '<g fill="none"><path d="M-22 18L-26 -10L-10 2L0 -16L10 2L26 -10L22 18Z"/><path d="M-22 24H22"/></g>',
     flower: '<g fill="none"><circle cx="0" cy="0" r="4"/><ellipse cx="0" cy="-12" rx="5" ry="8"/><ellipse cx="0" cy="-12" rx="5" ry="8" transform="rotate(60)"/><ellipse cx="0" cy="-12" rx="5" ry="8" transform="rotate(120)"/><ellipse cx="0" cy="-12" rx="5" ry="8" transform="rotate(180)"/><ellipse cx="0" cy="-12" rx="5" ry="8" transform="rotate(240)"/><ellipse cx="0" cy="-12" rx="5" ry="8" transform="rotate(300)"/></g>'
   };
   function stampSvg(st, big) {
     var u = 'ps' + (++PP.uid), c = st.color || '#5a1827';
     var label = esc(st.label || ''), len = Math.max((st.label || '').length, 1);
     var fs = Math.max(5.5, Math.min(9, 135 / (len * 0.91)));
-    var frame;
-    if (st.shape === 'square') frame = '<rect x="7" y="7" width="126" height="126" rx="16" fill="none" stroke-width="1.3"/><circle cx="70" cy="70" r="60.5" fill="none" stroke-width=".55"/>';
-    else if (st.shape === 'scalloped') frame = '<circle cx="70" cy="70" r="65" fill="none" stroke-width="2.2" stroke-dasharray="1.2 3.2" stroke-linecap="round"/><circle cx="70" cy="70" r="60.5" fill="none" stroke-width=".7"/>';
-    else frame = '<circle cx="70" cy="70" r="65" fill="none" stroke-width="1.3"/><circle cx="70" cy="70" r="60.5" fill="none" stroke-width=".55"/>';
+    var frame = '<circle cx="70" cy="70" r="65" fill="none" stroke-width="1.3"/><circle cx="70" cy="70" r="60.5" fill="none" stroke-width=".55"/>';
     return '<svg ' + (big ? 'class="pp-big" ' : '') + 'viewBox="0 0 140 140" role="img" aria-label="' + label + ' stamp"><defs>' +
       '<path id="t' + u + '" d="M 22,70 A 48,48 0 0 1 118,70"/><path id="b' + u + '" d="M 12,70 A 58,58 0 0 0 128,70"/></defs>' +
       '<g fill="' + c + '" stroke="' + c + '">' + frame +
@@ -303,6 +324,9 @@
     PP.loading = true; PP.loadError = '';
     try {
       PP.data = await apiFetch('GET', '/passport');
+      // Stamps/summaries are generated in the background the first time; look again shortly.
+      clearTimeout(PP.retry);
+      if (PP.data.art_pending && PP.tries++ < 3) PP.retry = setTimeout(function () { if ($('view-passport').classList.contains('active')) loadPassport(); }, 7000);
     } catch (e) {
       PP.loadError = /not found|404/i.test(e.message) ? 'The passport isn’t available yet.' : 'Couldn’t load your passport: ' + e.message;
       if (e.status === 401) PP.loadError = 'Please sign in again.';
@@ -329,7 +353,7 @@
   }
   window.openPassport = function () {
     setView('view-passport'); window.scrollTo(0, 0);
-    showCover(); banner(''); PP.data = null;
+    showCover(); banner(''); PP.data = null; PP.tries = 0;
     loadPassport();
   };
   window.closePassport = function () { closeWine(); setView('view-home'); window.scrollTo(0, 0); };

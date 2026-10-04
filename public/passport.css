@@ -9,7 +9,8 @@
   min-height: 100vh; color: var(--pp-ink); font-family: var(--pp-sans); -webkit-font-smoothing: antialiased;
   background: radial-gradient(ellipse at 50% -10%, #2a1a1c 0%, transparent 60%), var(--pp-desk);
 }
-#view-passport button { font: inherit; cursor: pointer; border: none; background: none; color: inherit; margin: 0; }
+/* :where() keeps this reset at zero specificity so the component rules below (e.g. .pp-chip.on) win. */
+:where(#view-passport) button { font: inherit; cursor: pointer; border: none; background: none; color: inherit; margin: 0; }
 #view-passport h1, #view-passport h2, #view-passport h3 { font-family: var(--pp-serif); font-weight: 500; margin: 0; }
 
 /* Cover */
@@ -104,8 +105,8 @@
 
 /* Cellar */
 .pp-filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 22px; }
-.pp-chip { font-size: 11px; font-weight: 500; letter-spacing: .14em; text-transform: uppercase; padding: 8px 16px !important; border-radius: 2px; border: 1px solid var(--pp-line-2) !important; color: var(--pp-muted); }
-.pp-chip.on { background: var(--pp-burg) !important; border-color: var(--pp-burg) !important; color: #fff; }
+.pp-chip { font-size: 11px; font-weight: 500; letter-spacing: .14em; text-transform: uppercase; padding: 8px 16px !important; border-radius: 8px; border: 1px solid var(--pp-line-2) !important; color: var(--pp-muted); }
+.pp-chip.on { background: var(--pp-burg) !important; border-color: var(--pp-burg) !important; color: #fff !important; }
 .pp-shelf { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 10px; padding: 6px 4px 0; position: relative; margin-bottom: 34px; }
 .pp-shelf::after { content: ""; position: absolute; left: 0; right: 0; bottom: -10px; height: 1px; background: var(--pp-line-2); box-shadow: 0 8px 14px rgba(40,25,20,.07); }
 
@@ -120,7 +121,7 @@
   .pp-btn:hover { background: var(--pp-burg-d) !important; }
   .pp-wine-card:hover { transform: translateY(-3px); }
   .pp-chip:hover { border-color: var(--pp-burg) !important; color: var(--pp-burg); }
-  .pp-chip.on:hover { color: #fff; }
+  .pp-chip.on:hover { color: #fff !important; }
   .pp-tag:hover { border-color: var(--pp-burg) !important; }
   .pp-tab:hover { color: var(--pp-burg); }
 }
@@ -150,7 +151,7 @@
 .pp-word { font-family: var(--pp-serif); font-style: italic; font-size: 18px; color: var(--pp-burg); margin-left: 8px; }
 .pp-tagbox { display: flex; flex-wrap: wrap; gap: 8px; }
 .pp-tag { font-size: 12px; padding: 6px 13px !important; border-radius: 2px; border: 1px solid var(--pp-line-2) !important; color: var(--pp-ink); }
-.pp-tag.on { background: var(--pp-burg) !important; color: #fff; border-color: var(--pp-burg) !important; }
+.pp-tag.on { background: var(--pp-burg) !important; color: #fff !important; border-color: var(--pp-burg) !important; }
 .pp-tag.others { border-style: dashed !important; }
 .pp-tag em { font-style: normal; opacity: .6; margin-left: 4px; font-size: 10.5px; }
 .pp-addtag { display: flex; gap: 8px; margin-top: 10px; }

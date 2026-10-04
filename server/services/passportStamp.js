@@ -10,20 +10,76 @@
 
 'use strict';
 
-// First matching rule wins, so order matters (more specific first).
+// What each stamp icon means - shown to the model so it can pick the one that
+// best captures an event (the drawings themselves live in public/passport.js).
+const MOTIFS = {
+  grapes: 'wine in general, or a grape-variety focus',
+  vineyard: 'rolling vineyards: an estate or hillside terroir (Napa, Sonoma, Tuscan hills)',
+  volcano: 'volcanic terroir (Etna, Santorini, Canary Islands)',
+  chateau: 'historic estates and chateaux (Bordeaux, Loire)',
+  river: 'river-valley wines (Mosel, Rhine, Loire, Douro)',
+  mountain: 'alpine or high-altitude wines',
+  wave: 'coastal, maritime or island wines',
+  palm: 'warm tropical or southern-hemisphere island feel',
+  sun: 'sunny summer evenings, Mediterranean warmth, rosé',
+  olive: 'Mediterranean olive-grove regions (Provence, Greece, Puglia)',
+  cypress: 'Tuscany or the Italian countryside',
+  pine: 'forest and cool northern regions (Oregon, Alsace)',
+  leaf: 'autumn, harvest, organic or natural wine',
+  flower: 'spring, floral and aromatic wines',
+  barrel: 'aged, cellar, old-world or traditional wines',
+  bottle: 'a bottle-focused tasting, e.g. a flight of one producer',
+  hourglass: 'vertical tastings and aged vintages: the passage of time',
+  bubbles: 'sparkling wine and celebrations',
+  cake: 'a birthday',
+  star: 'a special occasion or standout event',
+  crown: 'grand cru, luxury or prestige wines',
+  heart: 'romance or love',
+  snow: 'winter and the holidays',
+  moon: 'an evening dinner or night-time event',
+  flame: 'fireside, barbecue or bold, warming reds',
+  globe: 'a world tour across several countries',
+  compass: 'exploration and discovery',
+  question: 'a blind tasting or mystery theme',
+  cheese: 'a cheese pairing',
+  fish: 'a seafood pairing',
+  note: 'a music or jazz night',
+  book: 'an educational or masterclass event',
+};
+const MOTIF_IDS = Object.keys(MOTIFS);
+
+// Used when the model isn't available. First match wins, so order matters
+// (more specific first). Event-text rules are checked before wine-region rules.
 const MOTIF_RULES = [
+  ['cake',      /birthday|b-?day|turns? \d+/],
   ['heart',     /valentin|love|romance|date night|sweetheart|galentine/],
-  ['bubbles',   /champagne|prosecco|sparkling|bubbl|cava|cr[ée]mant|brut|fizz|new year|nye|toast|celebrat|birthday|anniversar/],
+  ['question',  /blind|mystery|guess/],
+  ['bubbles',   /champagne|prosecco|sparkling|bubbl|cava|cr[ée]mant|brut|fizz|new year|nye|toast|celebrat|anniversar/],
   ['snow',      /winter|snow|holiday|christmas|festive|fireside|cozy|cosy|mulled|december|january/],
-  ['sun',       /summer|sun|rose\b|ros[ée]|picnic|patio|terrace|brunch|beach|rooftop|sunset|golden hour|mediterranean|riviera/],
-  ['wave',      /coast|sea|ocean|ship|sail|harbor|harbour|island|beach|bay|nautical|seafood|oyster|albari[ñn]o|santorini|greece|greek/],
-  ['mountain',  /mountain|alps|alpine|ski|peak|highland|andes|hike|altitude|dolomit|piedmont|barolo|swiss|austria/],
-  ['leaf',      /autumn|fall\b|harvest|vendange|orchard|thanksgiving|october|november|forest|woodland|organic|natural|biodynamic/],
-  ['barrel',    /barrel|oak|cellar|aged|vertical|library|reserve|cave|vintage|old world|classic|bordeaux|rioja|tradition/],
+  ['cheese',    /cheese|fromage|charcuterie|pairing/],
+  ['fish',      /seafood|oyster|sushi|fish|shellfish/],
+  ['note',      /jazz|music|concert|vinyl|band/],
+  ['book',      /masterclass|class\b|workshop|educat|101|intro|lecture|learn/],
+  ['hourglass', /vertical|library|aged|vintages?\b|decades?/],
+  ['volcano',   /etna|santorini|volcan|canar|tenerife|lanzarote|pantelleria/],
+  ['river',     /mosel|rhine|rheingau|loire|douro|danube|river/],
+  ['chateau',   /bordeaux|ch[âa]teau|medoc|pauillac|margaux|saint-[ée]milion|pomerol|sauternes/],
+  ['mountain',  /mountain|alps|alpine|ski|peak|highland|andes|altitude|dolomit|piedmont|barolo|barbaresco|swiss|austria|mendoza/],
+  ['cypress',   /tuscan|toscana|chianti|brunello|montalcino|italian countryside/],
+  ['olive',     /provence|puglia|sicil|greece|greek|crete|olive|c[ôo]tes? du rh[ôo]ne|languedoc|roussillon/],
+  ['wave',      /coast|sea\b|ocean|harbor|harbour|island|beach|bay\b|nautical|albari[ñn]o|rias baixas|r[ií]as baixas|muscadet|santorini|greece|sancerre/],
+  ['palm',      /tropic|hawaii|caribbean|south africa|stellenbosch|australia|new zealand|barossa|marlborough/],
+  ['pine',      /oregon|willamette|alsace|forest|woodland|pacific northwest|washington state|mosel/],
+  ['vineyard',  /vineyard|terroir|napa|sonoma|estate|hillside|paso robles|santa barbara|lodi|central coast|california|rioja|ribera|priorat/],
+  ['sun',       /summer|sun\b|rose\b|ros[ée]|picnic|patio|terrace|brunch|rooftop|sunset|golden hour|mediterranean|riviera/],
+  ['leaf',      /autumn|fall\b|harvest|vendange|orchard|thanksgiving|october|november|organic|natural|biodynamic/],
+  ['barrel',    /barrel|oak|cellar|reserve|cave|old world|classic|tradition/],
+  ['flame',     /bbq|barbecue|grill|bold reds?|fire\b/],
+  ['crown',     /grand cru|grands? crus?|first growth|premier cru|prestige|luxury|icon/],
   ['moon',      /night|evening|midnight|moon|candle|dinner|black tie|speakeasy|after dark|late/],
-  ['globe',     /world|around the|global|travel|journey|passport|international|continent|country|countries|blind|tour/],
+  ['globe',     /world|around the|global|travel|journey|passport|international|continent|countr(y|ies)|tour/],
   ['flower',    /spring|bloom|garden|floral|blossom|may\b|april|easter|mother|riesling|viognier/],
-  ['grapes',    /vineyard|grape|vine|terroir|napa|sonoma|tuscany|burgundy|champagne region|pinot|cabernet|chardonnay|merlot|syrah|zinfandel|malbec/],
+  ['grapes',    /grape|vine|pinot|cabernet|chardonnay|merlot|syrah|zinfandel|malbec/],
 ];
 
 // Muted, classy ink colours (all legible on ivory paper).
@@ -40,16 +96,19 @@ function hashString(s) {
 
 /** Pick the stamp motif from the event's name + description (+ wine regions). */
 function pickMotif(event, wines) {
-  // The event's own words decide first; the wine list is only a tie-breaker
-  // for events whose name/description say nothing.
+  // Tiers: an explicit theme in the event's own words wins; then very specific
+  // terroir (volcano/river/chateau) from the event or its wines; then everything
+  // else, the event's own words before the wine list.
   const own = [event.name, event.description, event.location].filter(Boolean).join(' ').toLowerCase();
   const fromWines = (wines || []).map(w => `${w.grape} ${w.region} ${w.country}`).join(' ').toLowerCase();
-  for (const text of [own, fromWines]) {
-    for (const [motif, re] of MOTIF_RULES) {
-      if (re.test(text)) return motif;
-    }
-  }
-  return 'grapes';
+  const THEME = ['cake', 'heart', 'question', 'bubbles', 'snow', 'cheese', 'fish', 'note', 'book', 'hourglass'];
+  const TERROIR = ['volcano', 'river', 'chateau'];
+  const first = (ids, text) => {
+    for (const [motif, re] of MOTIF_RULES) if (ids.includes(motif) && re.test(text)) return motif;
+    return null;
+  };
+  const rest = MOTIF_RULES.map(r => r[0]).filter(id => !THEME.includes(id) && !TERROIR.includes(id));
+  return first(THEME, own) || first(TERROIR, `${own} ${fromWines}`) || first(rest, own) || first(rest, fromWines) || first(THEME, fromWines) || 'grapes';
 }
 
 /** Event date as e.g. "14 MAR 2026" in Pacific time (the app's one timezone). */
@@ -74,16 +133,16 @@ function stampLabel(name) {
  * @param {{event_id: string, name: string, event_date?: *, description?: string, location?: string}} event
  * @param {Array} [wines]
  */
-function buildStamp(event, wines) {
+function buildStamp(event, wines, art) {
   const id = String(event.event_id || event.name || '');
   return {
-    motif: pickMotif(event, wines),
+    motif: art && MOTIF_IDS.includes(art.motif) ? art.motif : pickMotif(event, wines),
     color: PALETTE[hashString(id) % PALETTE.length],
     label: stampLabel(event.name),
     dateLabel: pacificDateLabel(event.event_date),
     // Slight deterministic tilt so a page of stamps looks hand-placed.
     tilt: (hashString(id + 't') % 9) - 4,
-    shape: ['round', 'square', 'scalloped'][hashString(id + 's') % 3],
+    shape: 'round', // every stamp is a circle
   };
 }
 
@@ -120,13 +179,27 @@ function abridgeDescription(event, wines) {
       out = next;
       if (out.length >= MAX_BLURB * 0.6) break;
     }
-    if (out.length > MAX_BLURB) {
+    if (out.length < 90 && (wines || []).length) {
+      const line = winesLine(wines);
+      if (line && (out + ' ' + line).length <= MAX_BLURB + 40) out = `${out.replace(/[.!?]*$/, '.')} ${line}`;
+    }
+    if (out.length > MAX_BLURB + 40) {
       const cut = out.slice(0, MAX_BLURB - 1);
       out = cut.slice(0, cut.lastIndexOf(' ') > 40 ? cut.lastIndexOf(' ') : cut.length).replace(/[,;:\s-]+$/, '') + '…';
     }
     return out;
   }
   const w = wines || [];
+  return composeFromWines(event, w);
+}
+
+function winesLine(w) {
+  const places = [...new Set(w.map(x => x.region || x.country).filter(Boolean))];
+  if (!places.length) return '';
+  return `${w.length} wine${w.length === 1 ? '' : 's'} from ${listJoin(places.slice(0, 3))}${places.length > 3 ? ' and beyond' : ''}.`;
+}
+
+function composeFromWines(event, w) {
   const countries = [...new Set(w.map(x => x.country).filter(Boolean))];
   const parts = [];
   if (w.length) {
@@ -137,4 +210,4 @@ function abridgeDescription(event, wines) {
   return where ? `An evening of wine at ${where}.` : 'An evening of wine with the Circle.';
 }
 
-module.exports = { pickMotif, pacificDateLabel, stampLabel, buildStamp, abridgeDescription, cleanText, MOTIF_RULES };
+module.exports = { MOTIFS, MOTIF_IDS, pickMotif, pacificDateLabel, stampLabel, buildStamp, abridgeDescription, cleanText, MOTIF_RULES };

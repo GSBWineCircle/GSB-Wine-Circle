@@ -28,8 +28,26 @@ const MODEL_CANDIDATES = [
   'gemini-2.5-flash-lite',
   'gemini-flash-latest',
 ].filter(Boolean);
-const GEMINI_URL = m => `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`;
+const GEMINI_URL = m => `${process.env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com'}/v1beta/models/${m}:generateContent`;
 let workingModel = null; // last model that answered; tried first next time
+
+/** One Gemini generateContent call; returns the reply text, throws on HTTP/network failure. */
+async function geminiText(model, prompt, { grounded, apiKey, fetchImpl }) {
+  const body = { contents: [{ role: 'user', parts: [{ text: prompt }] }] };
+  // Search grounding can't be combined with a forced JSON response mode, so
+  // callers parse JSON out of plain text instead.
+  if (grounded) body.tools = [{ google_search: {} }];
+  const resp = await fetchImpl(GEMINI_URL(model), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(30000),
+  });
+  if (!resp.ok) throw new Error(`Gemini ${model} HTTP ${resp.status}`);
+  const data = await resp.json();
+  const cand = (data.candidates || [])[0];
+  return ((cand && cand.content && cand.content.parts) || []).map(p => p.text || '').join('\n');
+}
 
 function describeWine(w) {
   return [w.producer, w.name, w.vintage, w.grape && `(${w.grape})`, [w.region, w.country].filter(Boolean).join(', ')]
@@ -64,23 +82,7 @@ async function suggestTags(wine, opts = {}) {
     `"cedar", "silky tannins") covering aromas, flavours and texture. No prose.`;
 
   // One attempt: returns tags (possibly too few) or throws on HTTP/network failure.
-  async function ask(model, grounded) {
-    const body = { contents: [{ role: 'user', parts: [{ text: prompt }] }] };
-    // Search grounding can't be combined with a forced JSON response mode, so
-    // the reply is parsed out of plain text instead.
-    if (grounded) body.tools = [{ google_search: {} }];
-    const resp = await fetchImpl(GEMINI_URL(model), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(30000),
-    });
-    if (!resp.ok) throw new Error(`Gemini ${model} HTTP ${resp.status}`);
-    const data = await resp.json();
-    const cand = (data.candidates || [])[0];
-    const text = ((cand && cand.content && cand.content.parts) || []).map(p => p.text || '').join('\n');
-    return parseTagsFromText(text);
-  }
+  const ask = async (model, grounded) => parseTagsFromText(await geminiText(model, prompt, { grounded, apiKey, fetchImpl }));
 
   // Grounded attempts first (working model first), then one ungrounded attempt.
   const order = [...new Set([workingModel, ...MODEL_CANDIDATES].filter(Boolean))];
@@ -97,6 +99,55 @@ async function suggestTags(wine, opts = {}) {
     }
   }
   return fallback();
+}
+
+
+// ── Stamp icon + summary for an event ────────────────────────────────────────
+const { MOTIFS, MOTIF_IDS } = require('./passportStamp');
+
+/** Validate/clean a model reply into {blurb, motif}, or null if unusable. */
+function parseArt(text) {
+  const m = String(text || '').match(/\{[\s\S]*\}/);
+  if (!m) return null;
+  let o;
+  try { o = JSON.parse(m[0]); } catch (_) { return null; }
+  const blurb = String(o.blurb || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  if (blurb.length < 25 || blurb.length > 220 || !MOTIF_IDS.includes(o.motif)) return null;
+  return { blurb, motif: o.motif };
+}
+
+/**
+ * Ask Gemini to write the passport summary and choose the stamp icon for an
+ * event, from the event details and wine list. Returns null when unavailable
+ * (callers fall back to the rule-based summary/icon).
+ * @returns {Promise<{blurb: string, motif: string}|null>}
+ */
+async function generateArt(event, wines, opts = {}) {
+  const apiKey = opts.apiKey || process.env.GEMINI_API_KEY;
+  if (!apiKey) return null;
+  const fetchImpl = opts.fetch || global.fetch;
+  const list = (wines || []).map(w => `- ${describeWine(w)}`).join('\n') || '(no wine list recorded)';
+  const prompt =
+    `You are writing a keepsake entry for a wine club member's passport.\n\n` +
+    `EVENT\nName: ${event.name}\nDescription: ${event.description || '(none)'}\nLocation: ${event.location || '(none)'}\n\n` +
+    `WINES POURED\n${list}\n\n` +
+    `Do two things.\n` +
+    `1. "blurb": one or two evocative sentences (max 160 characters) capturing the essence of the evening - its theme, and where the wines came from or what made them distinctive (terroir, producer style). ` +
+    `Use only what is given above or well-established facts about the wines; invent no details about the event itself. Don't just repeat the event name.\n` +
+    `2. "motif": the single best stamp icon id for the event, chosen from this list (id: meaning):\n` +
+    MOTIF_IDS.map(id => `${id}: ${MOTIFS[id]}`).join('\n') + `\n` +
+    `Prefer an icon for the event's theme if it has one; otherwise one that reflects the terroir of the wines' region or producer.\n\n` +
+    `Reply with ONLY a JSON object: {"blurb": "...", "motif": "<id>"}`;
+  const order = [...new Set([workingModel, ...MODEL_CANDIDATES].filter(Boolean))];
+  for (const model of order) {
+    try {
+      const art = parseArt(await geminiText(model, prompt, { grounded: false, apiKey, fetchImpl }));
+      if (art) { workingModel = model; return art; }
+    } catch (err) {
+      console.error('Passport art generation failed:', err.message);
+    }
+  }
+  return null;
 }
 
 // ── Bottle image (Wikimedia Commons) ─────────────────────────────────────────
@@ -175,4 +226,4 @@ async function researchWine(wine, opts = {}) {
   return { style, tags, source };
 }
 
-module.exports = { _resetWorkingModel: () => { workingModel = null; }, suggestTags, researchWine, findBottleImage, parseTagsFromText, commonsTitleMatches, describeWine };
+module.exports = { generateArt, parseArt, _resetWorkingModel: () => { workingModel = null; }, suggestTags, researchWine, findBottleImage, parseTagsFromText, commonsTitleMatches, describeWine };

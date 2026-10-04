@@ -163,3 +163,47 @@ describe('passportAccess', () => {
     expect(ok('anyone@x.edu', '*')).toBe(true);
   });
 });
+
+describe('passport art', () => {
+  const gem = text => ({ ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text }] } }] }) });
+  const ev = { name: 'Etna Night', description: 'Volcanic whites', location: 'Lounge' };
+
+  test('every motif has a description and the stamp is always a circle', () => {
+    expect(stamp.MOTIF_IDS.length).toBeGreaterThan(25);
+    const st = stamp.buildStamp({ event_id: 'e9', name: 'Anything' }, [], { motif: 'volcano' });
+    expect(st.shape).toBe('round');
+    expect(st.motif).toBe('volcano');
+    expect(stamp.buildStamp({ event_id: 'e9', name: 'x' }, [], { motif: 'not-a-motif' }).motif).toBe('grapes');
+  });
+  test('fallback picks terroir/theme motifs', () => {
+    expect(stamp.pickMotif({ name: 'Sicilian Whites' }, [{ region: 'Etna' }])).toBe('volcano');
+    expect(stamp.pickMotif({ name: 'Mosel Riesling' })).toBe('river');
+    expect(stamp.pickMotif({ name: 'Maya turns 30' })).toBe('cake');
+    expect(stamp.pickMotif({ name: 'Blind Tasting' })).toBe('question');
+    expect(stamp.pickMotif({ name: 'Grand Cru Night' })).toBe('crown');
+  });
+  test('short descriptions get a wine line appended', () => {
+    expect(stamp.abridgeDescription({ description: 'Rosé on the lawn.' }, [{ region: 'Provence' }, { region: 'Tavel' }]))
+      .toBe('Rosé on the lawn. 2 wines from Provence and Tavel.');
+  });
+  test('parseArt validates motif and blurb', () => {
+    const ok = '{"blurb":"Volcanic whites from Etna, poured on a warm night under the lights.","motif":"volcano"}';
+    expect(research.parseArt('```json\n' + ok + '\n```')).toEqual({ blurb: 'Volcanic whites from Etna, poured on a warm night under the lights.', motif: 'volcano' });
+    expect(research.parseArt('{"blurb":"Volcanic whites from Etna, poured on a warm night.","motif":"dragon"}')).toBeNull();
+    expect(research.parseArt('{"blurb":"short","motif":"volcano"}')).toBeNull();
+    expect(research.parseArt('nope')).toBeNull();
+  });
+  test('generateArt: no key -> null; success; failure -> null', async () => {
+    delete process.env.GEMINI_API_KEY;
+    expect(await research.generateArt(ev, [])).toBeNull();
+    const good = gem('{"blurb":"Volcanic whites from Etna, poured on a warm night under the lights.","motif":"volcano"}');
+    const fetch = jest.fn().mockResolvedValue(good);
+    const art = await research.generateArt(ev, [{ name: 'Etna Bianco', region: 'Etna', country: 'Italy' }], { fetch, apiKey: 'k' });
+    expect(art.motif).toBe('volcano');
+    expect(JSON.parse(fetch.mock.calls[0][1].body).tools).toBeUndefined(); // ungrounded
+    expect(JSON.parse(fetch.mock.calls[0][1].body).contents[0].parts[0].text).toMatch(/Etna Bianco/);
+    const spy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    expect(await research.generateArt(ev, [], { fetch: jest.fn().mockRejectedValue(new Error('x')), apiKey: 'k' })).toBeNull();
+    spy.mockRestore();
+  });
+});

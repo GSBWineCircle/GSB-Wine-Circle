@@ -707,6 +707,7 @@
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
             <button class="btn-secondary btn-sm" onclick="pwAdd()">+ Add Wine</button>
             <button class="btn-primary btn-sm" id="pw-save" onclick="pwSave()">Save Wine List</button>
+            <button class="btn-secondary btn-sm" onclick="pwRegenArt()" title="Redo the stamp icon and summary members see">↻ Regenerate stamp &amp; summary</button>
             <span id="pw-status" style="font-size:12px;color:var(--muted);align-self:center;"></span>
           </div>
         </div>
@@ -1811,6 +1812,14 @@ async function pwSave() {
   } finally {
     btn.disabled = false; btn.textContent = 'Save Wine List';
   }
+}
+
+async function pwRegenArt() {
+  toast('Generating…');
+  try {
+    const r = await api('POST', `/passport/admin/events/${currentEventId}/regenerate-art`);
+    toast(`Stamp: ${r.art.motif}. Summary: ${r.art.blurb}`, 'success');
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 
 async function pwResearch(i) {
