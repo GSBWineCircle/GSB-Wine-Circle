@@ -52,6 +52,21 @@
         '<path d="M-1 -1L10 12L-1 25M10 12H25" fill="none" stroke="' + C.white + '" stroke-width="7.4"/>' +
         '<path d="M-1 -1L10 12L-1 25M10 12H25" fill="none" stroke="' + C.green + '" stroke-width="4.2"/>' +
         '<path d="M0 3.2V20.8L8 12Z" fill="' + C.yellow + '"/><path d="M0 5.8V18.2L5.4 12Z" fill="' + C.black + '"/>'; break;
+      case 'AU': case 'NZ': {
+        // Blue ensign: Union Jack canton, then the Commonwealth star + Southern Cross (AU) or four red stars (NZ).
+        // Kept inside the circle crop, so the canton sits in from the corner.
+        var cid = 'jk' + (++PP.uid), au = cc === 'AU', st = '';
+        var jack = '<clipPath id="' + cid + '"><rect x="3" y="3" width="9" height="9"/></clipPath><g clip-path="url(#' + cid + ')">' + r(3, 3, 9, 9, '#1f3a7a') +
+          '<path d="M3 3L12 12M12 3L3 12" stroke="' + C.white + '" stroke-width="1.7"/><path d="M3 3L12 12M12 3L3 12" stroke="' + C.red + '" stroke-width=".6"/>' +
+          '<path d="M7.5 3V12M3 7.5H12" stroke="' + C.white + '" stroke-width="2.8"/><path d="M7.5 3V12M3 7.5H12" stroke="' + C.red + '" stroke-width="1.5"/></g>';
+        if (au) {
+          [[18, 5.5, 1.1], [15, 12, 1.1], [21, 10.5, 1.1], [18, 19, 1.1], [19.6, 14.4, .6]].forEach(function (q) { st += '<circle cx="' + q[0] + '" cy="' + q[1] + '" r="' + q[2] + '" fill="' + C.white + '"/>'; });
+          st += '<circle cx="7.5" cy="18.4" r="2.3" fill="' + C.white + '"/>';
+        } else {
+          [[17, 6], [14.6, 11.6], [19.6, 11.4], [17, 18]].forEach(function (q) { st += '<circle cx="' + q[0] + '" cy="' + q[1] + '" r="1.5" fill="' + C.red + '" stroke="' + C.white + '" stroke-width=".5"/>'; });
+        }
+        body = r(0, 0, 24, 24, '#1f3a7a') + jack + st; break;
+      }
       case 'PT': body = r(0, 0, 9.6, 24, C.ptgreen) + r(9.6, 0, 14.4, 24, C.red) + '<circle cx="9.6" cy="12" r="3.9" fill="none" stroke="' + C.yellow + '" stroke-width="1.3"/>' + r(8, 10.2, 3.2, 3.6, C.white); break;
       case 'US': {
         var h = 24 / 7, stripes = r(0, 0, 24, 24, C.white), dots = '';
