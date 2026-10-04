@@ -82,6 +82,53 @@ const MOTIF_RULES = [
   ['grapes',    /grape|vine|pinot|cabernet|chardonnay|merlot|syrah|zinfandel|malbec/],
 ];
 
+// Background scene drawn faintly behind the icon (drawings in public/passport.js).
+const ACCENTS = {
+  rays: 'a radiating sunburst: classic, formal, celebratory',
+  stars: 'a night sky of stars',
+  sun: 'a sun in the corner: warm, summery, daytime',
+  moon: 'a crescent moon: an evening or night event',
+  hills: 'rolling hills: countryside and vineyard land',
+  waves: 'waves along the bottom: coast, sea or islands',
+  rows: 'converging vineyard rows: a working vineyard',
+  snow: 'falling snow: winter',
+};
+const ACCENT_IDS = Object.keys(ACCENTS);
+
+// A sensible scene for each icon when neither the model nor the event text suggests one.
+const DEFAULT_ACCENT = {
+  grapes: 'hills', vineyard: 'sun', volcano: 'stars', chateau: 'hills', river: 'hills', mountain: 'stars',
+  wave: 'sun', palm: 'waves', sun: 'hills', olive: 'hills', cypress: 'sun', pine: 'stars', leaf: 'hills',
+  flower: 'hills', barrel: 'rays', bottle: 'rays', hourglass: 'rays', bubbles: 'stars', cake: 'stars',
+  star: 'rays', crown: 'rays', heart: 'stars', snow: 'snow', moon: 'stars', flame: 'stars', globe: 'stars',
+  compass: 'rays', question: 'rays', cheese: 'hills', fish: 'waves', note: 'stars', book: 'rays',
+};
+
+const ACCENT_RULES = [
+  ['snow',  /winter|snow|holiday|christmas|fireside|mulled|december|january/],
+  ['moon',  /night|evening|midnight|moon|candle|dinner|black tie|speakeasy|after dark|late/],
+  ['sun',   /summer|sunny|picnic|patio|terrace|brunch|rooftop|sunset|golden hour|rose\b|ros[ée]/],
+  ['waves', /coast|sea\b|ocean|harbou?r|island|beach|nautical|seafood|oyster/],
+  ['rows',  /vineyard|estate|terroir|napa|sonoma/],
+];
+
+/** Pick the background scene: event words first, then the icon's default. */
+function pickAccent(event, motif) {
+  const own = [event.name, event.description].filter(Boolean).join(' ').toLowerCase();
+  for (const [id, re] of ACCENT_RULES) if (re.test(own)) return id;
+  return DEFAULT_ACCENT[motif] || 'rays';
+}
+
+/**
+ * The art table stores icon and scene together in its single `motif` column as
+ * "icon:scene" (or just "icon"), so no schema change was needed to add scenes.
+ */
+function parseMotifField(v) {
+  const [motif, accent] = String(v || '').split(':');
+  return { motif: MOTIF_IDS.includes(motif) ? motif : null, accent: ACCENT_IDS.includes(accent) ? accent : null };
+}
+const joinMotifField = (motif, accent) => (accent ? `${motif}:${accent}` : motif);
+
 // Muted, classy ink colours (all legible on ivory paper).
 const PALETTE = ['#5a1827', '#2f4a3a', '#1f3a52', '#6b4a1e', '#4a2f55', '#7a3b2e', '#33474f', '#6a5a1e'];
 
@@ -135,8 +182,11 @@ function stampLabel(name) {
  */
 function buildStamp(event, wines, art) {
   const id = String(event.event_id || event.name || '');
+  const stored = art ? parseMotifField(art.motif) : { motif: null, accent: null };
+  const motif = stored.motif || pickMotif(event, wines);
   return {
-    motif: art && MOTIF_IDS.includes(art.motif) ? art.motif : pickMotif(event, wines),
+    motif,
+    accent: stored.accent || pickAccent(event, motif),
     color: PALETTE[hashString(id) % PALETTE.length],
     label: stampLabel(event.name),
     dateLabel: pacificDateLabel(event.event_date),
@@ -210,4 +260,4 @@ function composeFromWines(event, w) {
   return where ? `An evening of wine at ${where}.` : 'An evening of wine with the Circle.';
 }
 
-module.exports = { MOTIFS, MOTIF_IDS, pickMotif, pacificDateLabel, stampLabel, buildStamp, abridgeDescription, cleanText, MOTIF_RULES };
+module.exports = { ACCENTS, ACCENT_IDS, pickAccent, parseMotifField, joinMotifField, MOTIFS, MOTIF_IDS, pickMotif, pacificDateLabel, stampLabel, buildStamp, abridgeDescription, cleanText, MOTIF_RULES };

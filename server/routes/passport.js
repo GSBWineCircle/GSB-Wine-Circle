@@ -7,7 +7,7 @@ const db = require('../db');
 const { requireAuth, requireAdmin } = require('../middleware/auth');
 const { audit } = require('../services/audit');
 const { isPassportEnabledFor } = require('../services/passportAccess');
-const { buildStamp, abridgeDescription } = require('../services/passportStamp');
+const { joinMotifField, buildStamp, abridgeDescription } = require('../services/passportStamp');
 const { researchWine, findBottleImage, generateArt } = require('../services/wineResearch');
 const crypto = require('crypto');
 const { normalizeTag, ruleBasedSuggestions } = require('../services/wineTags');
@@ -89,7 +89,7 @@ async function ensureArt(eventId, { force = false } = {}) {
       `INSERT INTO event_passport_art (event_id, blurb, motif, input_hash) VALUES ($1,$2,$3,$4)
        ON CONFLICT (event_id) DO UPDATE SET blurb=EXCLUDED.blurb, motif=EXCLUDED.motif,
          input_hash=EXCLUDED.input_hash, generated_at=NOW()`,
-      [eventId, art.blurb, art.motif, key]);
+      [eventId, art.blurb, joinMotifField(art.motif, art.accent), key]);
     return art;
   } catch (err) {
     console.error('ensureArt failed:', err.message);

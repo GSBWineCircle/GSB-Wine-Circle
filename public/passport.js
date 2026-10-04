@@ -139,18 +139,64 @@
     crown: '<g fill="none"><path d="M-22 18L-26 -10L-10 2L0 -16L10 2L26 -10L22 18Z"/><path d="M-22 24H22"/></g>',
     flower: '<g fill="none"><circle cx="0" cy="0" r="4"/><ellipse cx="0" cy="-12" rx="5" ry="8"/><ellipse cx="0" cy="-12" rx="5" ry="8" transform="rotate(60)"/><ellipse cx="0" cy="-12" rx="5" ry="8" transform="rotate(120)"/><ellipse cx="0" cy="-12" rx="5" ry="8" transform="rotate(180)"/><ellipse cx="0" cy="-12" rx="5" ry="8" transform="rotate(240)"/><ellipse cx="0" cy="-12" rx="5" ry="8" transform="rotate(300)"/></g>'
   };
+  // Faint background scenes drawn inside the medallion (coordinates centred on 0,0; radius ~35).
+  function sceneSvg(id) {
+    var i, a, out = '';
+    switch (id) {
+      case 'rays':
+        for (i = 0; i < 24; i++) {
+          a = i * Math.PI / 12; var r2 = i % 2 ? 26 : 36;
+          out += '<line x1="' + (Math.cos(a) * 13).toFixed(1) + '" y1="' + (Math.sin(a) * 13).toFixed(1) + '" x2="' + (Math.cos(a) * r2).toFixed(1) + '" y2="' + (Math.sin(a) * r2).toFixed(1) + '" stroke-width=".8"/>';
+        }
+        return out;
+      case 'stars': {
+        var sp = function (x, y, k) { return '<path transform="translate(' + x + ' ' + y + ') scale(' + k + ')" d="M0 -4L1 -1L4 0L1 1L0 4L-1 1L-4 0L-1 -1Z" stroke="none"/>'; };
+        out = sp(-22, -20, 1) + sp(20, -24, .8) + sp(26, 4, .6) + sp(-27, 8, .7) + sp(-8, -30, .6) + sp(12, 24, .7);
+        [[-14, 18], [8, -14], [28, -12], [-30, -6], [2, 30], [-20, 28], [18, 12], [-4, -22]].forEach(function (p) { out += '<circle cx="' + p[0] + '" cy="' + p[1] + '" r="1" stroke="none"/>'; });
+        return out;
+      }
+      case 'sun':
+        out = '<circle cx="19" cy="-17" r="8" stroke="none"/>';
+        for (i = 0; i < 10; i++) { a = i * Math.PI / 5; out += '<line x1="' + (19 + Math.cos(a) * 11).toFixed(1) + '" y1="' + (-17 + Math.sin(a) * 11).toFixed(1) + '" x2="' + (19 + Math.cos(a) * 15).toFixed(1) + '" y2="' + (-17 + Math.sin(a) * 15).toFixed(1) + '" stroke-width="1.1"/>'; }
+        return out;
+      case 'moon':
+        return '<path transform="translate(-19 -16) scale(.5)" d="M10 -22A22 22 0 1 0 22 10A17 17 0 1 1 10 -22Z" stroke="none"/>' +
+          '<circle cx="14" cy="-22" r="1.2" stroke="none"/><circle cx="24" cy="-8" r="1" stroke="none"/><circle cx="-4" cy="-28" r="1" stroke="none"/><circle cx="26" cy="12" r="1.1" stroke="none"/>';
+      case 'hills':
+        return '<path d="M-36 36V14Q-20 2 -4 12T36 6V36Z" stroke="none" opacity=".7"/><path d="M-36 36V26Q-14 14 8 23T36 19V36Z" stroke="none"/>';
+      case 'waves':
+        for (i = 0; i < 4; i++) { var y = 12 + i * 7; out += '<path d="M-36 ' + y + 'q6 -5 12 0t12 0t12 0t12 0t12 0t12 0" fill="none" stroke-width="1"/>'; }
+        return out;
+      case 'rows':
+        return '<path d="M-36 8H36" fill="none" stroke-width=".8"/><path d="M-34 36L-4 8M-17 36L-2 8M0 36V8M17 36L2 8M34 36L4 8" fill="none" stroke-width=".9"/>';
+      case 'snow':
+        [[-24, -18], [-8, -26], [10, -22], [26, -14], [-30, 0], [-14, -6], [4, -10], [20, 0], [30, 14], [-22, 14], [-4, 10], [14, 18], [-12, 26], [8, 30], [26, 28]].forEach(function (p, k) { out += '<circle cx="' + p[0] + '" cy="' + p[1] + '" r="' + (k % 3 ? 1.1 : 1.7) + '" stroke="none"/>'; });
+        return out;
+    }
+    return '';
+  }
+
   function stampSvg(st, big) {
     var u = 'ps' + (++PP.uid), c = st.color || '#5a1827';
     var label = esc(st.label || ''), len = Math.max((st.label || '').length, 1);
     var fs = Math.max(5.5, Math.min(9, 135 / (len * 0.91)));
-    var frame = '<circle cx="70" cy="70" r="65" fill="none" stroke-width="1.3"/><circle cx="70" cy="70" r="60.5" fill="none" stroke-width=".55"/>';
+    var spark = function (x) { return '<path transform="translate(' + x + ' 70) scale(.9)" d="M0 -4L1 -1L4 0L1 1L0 4L-1 1L-4 0L-1 -1Z" stroke="none"/>'; };
     return '<svg ' + (big ? 'class="pp-big" ' : '') + 'viewBox="0 0 140 140" role="img" aria-label="' + label + ' stamp"><defs>' +
-      '<path id="t' + u + '" d="M 22,70 A 48,48 0 0 1 118,70"/><path id="b' + u + '" d="M 12,70 A 58,58 0 0 0 128,70"/></defs>' +
-      '<g fill="' + c + '" stroke="' + c + '">' + frame +
-      '<circle cx="70" cy="70" r="39" fill="none" stroke-width=".55"/>' +
+      '<path id="t' + u + '" d="M 22,70 A 48,48 0 0 1 118,70"/><path id="b' + u + '" d="M 12,70 A 58,58 0 0 0 128,70"/>' +
+      '<clipPath id="m' + u + '"><circle cx="70" cy="70" r="35.5"/></clipPath></defs>' +
+      '<g fill="' + c + '" stroke="' + c + '">' +
+      // outer ornament: bold ring, a ring of dots, a hairline
+      '<circle cx="70" cy="70" r="66" fill="none" stroke-width="1.5"/>' +
+      '<circle cx="70" cy="70" r="63.2" fill="none" stroke-width="1.6" stroke-dasharray=".1 3.2" stroke-linecap="round"/>' +
+      '<circle cx="70" cy="70" r="60.5" fill="none" stroke-width=".55"/>' +
+      // medallion: tint, double ring, scene, then the icon on top
+      '<circle cx="70" cy="70" r="39" fill="' + c + '" fill-opacity=".07" stroke-width="1.1"/>' +
+      '<circle cx="70" cy="70" r="36.3" fill="none" stroke-width=".4"/>' +
+      '<g clip-path="url(#m' + u + ')"><g transform="translate(70 70)" opacity=".3">' + sceneSvg(st.accent) + '</g></g>' +
       '<text font-family="Figtree,sans-serif" font-weight="600" font-size="' + fs.toFixed(1) + '" letter-spacing="' + (fs * 0.25).toFixed(1) + '" stroke="none" text-anchor="middle"><textPath href="#t' + u + '" startOffset="50%">' + label + '</textPath></text>' +
       '<text font-family="Figtree,sans-serif" font-weight="500" font-size="7.2" letter-spacing="2.4" stroke="none" text-anchor="middle"><textPath href="#b' + u + '" startOffset="50%">' + esc(st.dateLabel || '') + '</textPath></text>' +
-      '<g transform="translate(70 70) scale(.95)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">' + (MOTIFS[st.motif] || MOTIFS.grapes) + '</g>' +
+      spark(15.5) + spark(124.5) +
+      '<g transform="translate(70 70) scale(.88)" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">' + (MOTIFS[st.motif] || MOTIFS.grapes) + '</g>' +
       '</g></svg>';
   }
 

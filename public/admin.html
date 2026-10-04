@@ -1818,7 +1818,7 @@ async function pwRegenArt() {
   toast('Generating…');
   try {
     const r = await api('POST', `/passport/admin/events/${currentEventId}/regenerate-art`);
-    toast(`Stamp: ${r.art.motif}. Summary: ${r.art.blurb}`, 'success');
+    toast(`Stamp: ${r.art.motif}${r.art.accent ? " + " + r.art.accent : ""}. Summary: ${r.art.blurb}`, 'success');
   } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
 

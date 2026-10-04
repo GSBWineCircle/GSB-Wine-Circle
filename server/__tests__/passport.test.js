@@ -188,8 +188,11 @@ describe('passport art', () => {
   });
   test('parseArt validates motif and blurb', () => {
     const ok = '{"blurb":"Volcanic whites from Etna, poured on a warm night under the lights.","motif":"volcano"}';
-    expect(research.parseArt('```json\n' + ok + '\n```')).toEqual({ blurb: 'Volcanic whites from Etna, poured on a warm night under the lights.', motif: 'volcano' });
+    expect(research.parseArt('```json\n' + ok + '\n```')).toEqual({ blurb: 'Volcanic whites from Etna, poured on a warm night under the lights.', motif: 'volcano', accent: null });
     expect(research.parseArt('{"blurb":"Volcanic whites from Etna, poured on a warm night.","motif":"dragon"}')).toBeNull();
+    // accent is optional and an unknown one is dropped, not fatal
+    expect(research.parseArt('{"blurb":"Volcanic whites from Etna, poured on a warm night.","motif":"volcano","accent":"stars"}').accent).toBe('stars');
+    expect(research.parseArt('{"blurb":"Volcanic whites from Etna, poured on a warm night.","motif":"volcano","accent":"lasers"}').accent).toBeNull();
     expect(research.parseArt('{"blurb":"short","motif":"volcano"}')).toBeNull();
     expect(research.parseArt('nope')).toBeNull();
   });
@@ -205,5 +208,22 @@ describe('passport art', () => {
     const spy = jest.spyOn(console, 'error').mockImplementation(() => {});
     expect(await research.generateArt(ev, [], { fetch: jest.fn().mockRejectedValue(new Error('x')), apiKey: 'k' })).toBeNull();
     spy.mockRestore();
+  });
+});
+
+describe('stamp scenes', () => {
+  test('motif field stores icon and scene together, tolerating old/invalid values', () => {
+    expect(stamp.parseMotifField('volcano:stars')).toEqual({ motif: 'volcano', accent: 'stars' });
+    expect(stamp.parseMotifField('volcano')).toEqual({ motif: 'volcano', accent: null });
+    expect(stamp.parseMotifField('dragon:lasers')).toEqual({ motif: null, accent: null });
+    expect(stamp.joinMotifField('volcano', 'stars')).toBe('volcano:stars');
+    expect(stamp.joinMotifField('volcano', null)).toBe('volcano');
+  });
+  test('buildStamp carries a scene: stored, else event words, else the icon default', () => {
+    const ev = { event_id: 'e1', name: 'Summer Picnic' };
+    expect(stamp.buildStamp(ev, [], { motif: 'volcano:waves' }).accent).toBe('waves');
+    expect(stamp.buildStamp(ev, [], { motif: 'volcano' }).accent).toBe('sun');
+    expect(stamp.buildStamp({ event_id: 'e2', name: 'Tasting' }, [], { motif: 'barrel' }).accent).toBe('rays');
+    stamp.MOTIF_IDS.forEach(id => expect(stamp.ACCENT_IDS).toContain(stamp.pickAccent({ name: 'x' }, id)));
   });
 });

@@ -103,7 +103,7 @@ async function suggestTags(wine, opts = {}) {
 
 
 // ── Stamp icon + summary for an event ────────────────────────────────────────
-const { MOTIFS, MOTIF_IDS } = require('./passportStamp');
+const { MOTIFS, MOTIF_IDS, ACCENTS, ACCENT_IDS } = require('./passportStamp');
 
 /** Validate/clean a model reply into {blurb, motif}, or null if unusable. */
 function parseArt(text) {
@@ -113,14 +113,15 @@ function parseArt(text) {
   try { o = JSON.parse(m[0]); } catch (_) { return null; }
   const blurb = String(o.blurb || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
   if (blurb.length < 25 || blurb.length > 220 || !MOTIF_IDS.includes(o.motif)) return null;
-  return { blurb, motif: o.motif };
+  // The background scene is optional: an unknown one is dropped, not fatal.
+  return { blurb, motif: o.motif, accent: ACCENT_IDS.includes(o.accent) ? o.accent : null };
 }
 
 /**
- * Ask Gemini to write the passport summary and choose the stamp icon for an
+ * Ask Gemini to write the passport summary and choose the stamp icon and background scene for an
  * event, from the event details and wine list. Returns null when unavailable
  * (callers fall back to the rule-based summary/icon).
- * @returns {Promise<{blurb: string, motif: string}|null>}
+ * @returns {Promise<{blurb: string, motif: string, accent: string|null}|null>}
  */
 async function generateArt(event, wines, opts = {}) {
   const apiKey = opts.apiKey || process.env.GEMINI_API_KEY;
@@ -136,8 +137,10 @@ async function generateArt(event, wines, opts = {}) {
     `Use only what is given above or well-established facts about the wines; invent no details about the event itself. Don't just repeat the event name.\n` +
     `2. "motif": the single best stamp icon id for the event, chosen from this list (id: meaning):\n` +
     MOTIF_IDS.map(id => `${id}: ${MOTIFS[id]}`).join('\n') + `\n` +
-    `Prefer an icon for the event's theme if it has one; otherwise one that reflects the terroir of the wines' region or producer.\n\n` +
-    `Reply with ONLY a JSON object: {"blurb": "...", "motif": "<id>"}`;
+    `Prefer an icon for the event's theme if it has one; otherwise one that reflects the terroir of the wines' region or producer.\n` +
+    `3. "accent": the faint background scene drawn behind the icon, chosen from this list (id: meaning), complementing the icon rather than repeating it:\n` +
+    ACCENT_IDS.map(id => `${id}: ${ACCENTS[id]}`).join('\n') + `\n\n` +
+    `Reply with ONLY a JSON object: {"blurb": "...", "motif": "<id>", "accent": "<id>"}`;
   const order = [...new Set([workingModel, ...MODEL_CANDIDATES].filter(Boolean))];
   for (const model of order) {
     try {
