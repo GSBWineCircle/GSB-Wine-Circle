@@ -6,7 +6,7 @@ const { v4: uuidv4 } = require('uuid');
 const db = require('../db');
 const { requireAuth, requireAdmin } = require('../middleware/auth');
 const { audit } = require('../services/audit');
-const { isPassportEnabledFor } = require('../services/passportAccess');
+const { isPassportEnabledFor, VISIBILITIES, DEFAULT_VISIBILITY, isEventVisibleInPassport } = require('../services/passportAccess');
 const { joinMotifField, buildStamp, abridgeDescription } = require('../services/passportStamp');
 const { researchWine, findBottleImage, generateArt } = require('../services/wineResearch');
 const crypto = require('crypto');
@@ -99,6 +99,16 @@ async function ensureArt(eventId, { force = false } = {}) {
   }
 }
 
+// Per-event visibility. A missing table (SQL not run yet) just means everyone gets the default.
+async function visibilityMap(eventIds) {
+  try {
+    const { rows } = await db.query('SELECT event_id, visibility FROM event_passport_settings WHERE event_id = ANY($1)', [eventIds]);
+    return new Map(rows.map(r => [r.event_id, r.visibility]));
+  } catch (_) {
+    return new Map();
+  }
+}
+
 async function listEventWines(eventId) {
   const { rows } = await db.query(
     `SELECT ${WINE_COLS} FROM event_wines WHERE event_id = $1 ORDER BY position, created_at`, [eventId]);
@@ -113,7 +123,9 @@ adminRouter.get('/events/:eventId/wines', requireAdmin, async (req, res) => {
     const wines = await listEventWines(req.params.eventId);
     const ids = wines.map(w => w.wine_id);
     const shared = ids.length ? await sharedTagCounts(ids, true) : {};
+    const vis = await visibilityMap([req.params.eventId]);
     res.json({
+      visibility: vis.get(req.params.eventId) || DEFAULT_VISIBILITY,
       wines: wines.map(w => ({ ...wineOut(w), shared_tags: shared[w.wine_id] || [] })),
     });
   } catch (err) {
@@ -194,6 +206,30 @@ adminRouter.post('/wines/:wineId/research', requireAdmin, async (req, res) => {
     const { rows } = await db.query(`SELECT ${WINE_COLS} FROM event_wines WHERE wine_id = $1`, [req.params.wineId]);
     if (!rows.length) return res.status(404).json({ error: 'Wine not found' });
     res.json({ wine: wineOut(rows[0]) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal error' });
+  }
+});
+
+// PUT /api/passport/admin/events/:eventId/visibility — when the event shows in members' passports
+adminRouter.put('/events/:eventId/visibility', requireAdmin, async (req, res) => {
+  const visibility = (req.body || {}).visibility;
+  if (!VISIBILITIES.includes(visibility)) return res.status(400).json({ error: 'visibility must be hidden, start or after.' });
+  try {
+    const { rows } = await db.query('SELECT 1 FROM events WHERE event_id = $1', [req.params.eventId]);
+    if (!rows.length) return res.status(404).json({ error: 'Event not found' });
+    try {
+      await db.query(
+        `INSERT INTO event_passport_settings (event_id, visibility) VALUES ($1,$2)
+         ON CONFLICT (event_id) DO UPDATE SET visibility = EXCLUDED.visibility, updated_at = NOW()`,
+        [req.params.eventId, visibility]);
+    } catch (e) {
+      if (e.code === '42P01') return res.status(503).json({ error: 'Run the passport visibility SQL in Supabase first (see schema.sql).' });
+      throw e;
+    }
+    await audit(req.member.email, 'passport_visibility_set', 'event_passport_settings', req.params.eventId, null, { visibility });
+    res.json({ visibility });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Internal error' });
@@ -309,11 +345,15 @@ memberRouter.get('/enabled', requireAuth, (req, res) => {
 // GET /api/passport — the caller's passport: events they attended + their notes
 memberRouter.get('/', requireAuth, requirePassportAccess, async (req, res) => {
   try {
-    const { rows: events } = await db.query(
-      `SELECT e.event_id, e.name, e.event_date, e.location, e.description
+    // Candidates: events the member attended or is confirmed for; the event's
+    // visibility setting decides which of them actually show right now.
+    const { rows: cands } = await db.query(
+      `SELECT e.event_id, e.name, e.event_date, e.location, e.description, s.status AS signup_status
        FROM events e JOIN signups s ON s.event_id = e.event_id
-       WHERE s.member_id = $1 AND s.status = 'Attended'
+       WHERE s.member_id = $1 AND s.status IN ('Attended', 'Invited')
        ORDER BY e.event_date DESC NULLS LAST`, [req.member.member_id]);
+    const vis = await visibilityMap(cands.map(c => c.event_id));
+    const events = cands.filter(c => isEventVisibleInPassport(vis.get(c.event_id), c.signup_status, c.event_date));
     const eventIds = events.map(e => e.event_id);
     const { rows: wines } = eventIds.length ? await db.query(
       `SELECT ${WINE_COLS} FROM event_wines WHERE event_id = ANY($1) ORDER BY position, created_at`, [eventIds]) : { rows: [] };
@@ -374,10 +414,15 @@ memberRouter.put('/wines/:wineId/note', requireAuth, requirePassportAccess, asyn
   if (input.error) return res.status(400).json({ error: input.error });
   try {
     const { rows } = await db.query(
-      `SELECT 1 FROM event_wines w JOIN signups s ON s.event_id = w.event_id
-       WHERE w.wine_id = $1 AND s.member_id = $2 AND s.status = 'Attended'`,
+      `SELECT w.event_id, e.event_date, s.status AS signup_status
+       FROM event_wines w JOIN events e ON e.event_id = w.event_id
+       JOIN signups s ON s.event_id = w.event_id
+       WHERE w.wine_id = $1 AND s.member_id = $2 AND s.status IN ('Attended', 'Invited')`,
       [req.params.wineId, req.member.member_id]);
-    if (!rows.length) return res.status(403).json({ error: 'You can only add notes for wines from events you attended.' });
+    const vis = rows.length ? await visibilityMap([rows[0].event_id]) : new Map();
+    if (!rows.length || !isEventVisibleInPassport(vis.get(rows[0].event_id), rows[0].signup_status, rows[0].event_date)) {
+      return res.status(403).json({ error: 'You can only add notes for wines from events in your passport.' });
+    }
 
     if (isEmptyNote(input)) {
       await db.query('DELETE FROM member_wine_notes WHERE member_id=$1 AND wine_id=$2', [req.member.member_id, req.params.wineId]);

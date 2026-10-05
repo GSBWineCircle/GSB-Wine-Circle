@@ -379,3 +379,14 @@ CREATE TABLE IF NOT EXISTS event_passport_art (
   input_hash   TEXT NOT NULL,
   generated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- ── Passport: per-event visibility ───────────────────────────────────────────
+-- When an event shows in members' passports: 'hidden' (never), 'start' (from the
+-- moment the event begins, for confirmed attendees) or 'after' (once attendance
+-- is recorded - the default, and what an event with no row here gets). A
+-- separate table so deploying the code before running this block is harmless.
+CREATE TABLE IF NOT EXISTS event_passport_settings (
+  event_id   TEXT PRIMARY KEY REFERENCES events (event_id) ON DELETE CASCADE,
+  visibility TEXT NOT NULL DEFAULT 'after' CHECK (visibility IN ('hidden', 'start', 'after')),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

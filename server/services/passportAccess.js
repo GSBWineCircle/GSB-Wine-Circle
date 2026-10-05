@@ -21,4 +21,29 @@ function isPassportEnabledFor(email, env) {
   return !!email && list.includes(String(email).trim().toLowerCase());
 }
 
-module.exports = { isPassportEnabledFor, allowedList, DEFAULT_ALLOWED };
+const VISIBILITIES = ['hidden', 'start', 'after'];
+const DEFAULT_VISIBILITY = 'after';
+
+/**
+ * Whether an event shows in a member's passport.
+ *  - hidden: never.
+ *  - after (default): once attendance has been recorded (status Attended).
+ *  - start: from the moment the event begins, for confirmed attendees
+ *    (Invited), and of course once Attended.
+ * @param {string} visibility
+ * @param {string} signupStatus the member's internal signup status
+ * @param {*} eventDate
+ * @param {Date} [now]
+ */
+function isEventVisibleInPassport(visibility, signupStatus, eventDate, now = new Date()) {
+  const v = VISIBILITIES.includes(visibility) ? visibility : DEFAULT_VISIBILITY;
+  if (v === 'hidden') return false;
+  if (signupStatus === 'Attended') return true;
+  if (v === 'start' && signupStatus === 'Invited' && eventDate) {
+    const d = new Date(eventDate);
+    return !isNaN(d.getTime()) && d.getTime() <= now.getTime();
+  }
+  return false;
+}
+
+module.exports = { VISIBILITIES, DEFAULT_VISIBILITY, isEventVisibleInPassport, isPassportEnabledFor, allowedList, DEFAULT_ALLOWED };

@@ -231,3 +231,24 @@ describe('stamp scenes', () => {
     stamp.MOTIF_IDS.forEach(id => expect(stamp.ACCENT_IDS).toContain(stamp.pickAccent({ name: 'x' }, id)));
   });
 });
+
+describe('passport event visibility', () => {
+  const { isEventVisibleInPassport: vis } = require('../services/passportAccess');
+  const past = new Date(Date.now() - 3600e3), future = new Date(Date.now() + 3600e3);
+  test('default/after: only once attended', () => {
+    expect(vis(undefined, 'Attended', past)).toBe(true);
+    expect(vis('after', 'Invited', past)).toBe(false);
+    expect(vis('bogus', 'Invited', past)).toBe(false);
+  });
+  test('start: confirmed attendees once the event has begun', () => {
+    expect(vis('start', 'Invited', past)).toBe(true);
+    expect(vis('start', 'Invited', future)).toBe(false);
+    expect(vis('start', 'Invited', null)).toBe(false);
+    expect(vis('start', 'Attended', future)).toBe(true);
+    for (const st of ['Pending', 'Lost', 'Waitlist', 'Dropped', 'Flaked']) expect(vis('start', st, past)).toBe(false);
+  });
+  test('hidden: never, even if attended', () => {
+    expect(vis('hidden', 'Attended', past)).toBe(false);
+    expect(vis('hidden', 'Invited', past)).toBe(false);
+  });
+});

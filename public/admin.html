@@ -703,6 +703,14 @@
             suggestions are researched automatically when you save; a bottle photo is looked up if one is freely
             available, otherwise an illustrated bottle is shown (or upload your own).
           </p>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
+            <label for="pw-visibility" style="font-size:13px;font-weight:600;margin:0;">Show in members' passports:</label>
+            <select id="pw-visibility" onchange="pwSetVisibility(this.value)" style="width:auto;">
+              <option value="after">After the event (once attendance is finalized)</option>
+              <option value="start">From the start of the event (confirmed attendees)</option>
+              <option value="hidden">Hidden</option>
+            </select>
+          </div>
           <div id="pw-list"><span class="spinner"></span></div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
             <button class="btn-secondary btn-sm" onclick="pwAdd()">+ Add Wine</button>
@@ -1753,6 +1761,7 @@ async function loadPassportWines(eventId) {
     const r = await api('GET', `/passport/admin/events/${eventId}/wines`);
     if (pwLoadedFor !== eventId) return;
     pwWines = r.wines;
+    document.getElementById('pw-visibility').value = r.visibility || 'after';
     pwRender();
   } catch (e) {
     document.getElementById('pw-list').innerHTML = `<div style="font-size:13px;color:var(--danger,#b91c1c);">Couldn't load the wine list: ${esc(e.message)}</div>`;
@@ -1811,6 +1820,17 @@ async function pwSave() {
     toast('Error: ' + e.message, 'error');
   } finally {
     btn.disabled = false; btn.textContent = 'Save Wine List';
+  }
+}
+
+async function pwSetVisibility(v) {
+  const sel = document.getElementById('pw-visibility');
+  try {
+    await api('PUT', `/passport/admin/events/${currentEventId}/visibility`, { visibility: v });
+    toast(v === 'hidden' ? 'Hidden from members\' passports.' : v === 'start' ? 'Shows from the start of the event.' : 'Shows after the event.', 'success');
+  } catch (e) {
+    toast('Error: ' + e.message, 'error');
+    loadPassportWines(currentEventId); // put the select back to what is saved
   }
 }
 
