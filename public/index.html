@@ -327,7 +327,10 @@
     <div class="pp-passport">
       <div class="pp-head">
         <div><h2 id="pp-head-name">Passport</h2><div class="pp-sub">Wine Circle, Stanford GSB</div></div>
-        <button type="button" class="pp-close" onclick="closePassport()">Close</button>
+        <div class="pp-head-actions">
+          <button type="button" class="pp-export" id="pp-export" onclick="exportPassportPdf()">Export PDF</button>
+          <button type="button" class="pp-close" onclick="closePassport()">Close</button>
+        </div>
       </div>
       <div class="pp-stats" id="pp-stats"></div>
       <div class="pp-flags" id="pp-flags"></div>

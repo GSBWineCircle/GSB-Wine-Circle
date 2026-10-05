@@ -380,6 +380,75 @@
     } finally { PP.saving = false; }
   }
 
+
+  // ── PDF export ────────────────────────────────────────────────────────────
+  // Builds a print-styled copy of the passport (cover, then one page per event)
+  // and opens the browser's print dialog; "Save as PDF" there produces the file.
+  // It reuses the on-screen stamp/flag/bottle drawings so the PDF matches the app.
+  function printWine(w) {
+    var my = w.my || {}, r = my.rating || 0;
+    var origin = [w.region, w.country].filter(Boolean).join(', ');
+    var cc = w.country ? countryCode(w.country) : '';
+    var sub = [w.producer, w.vintage].filter(Boolean).join(' · ');
+    var glasses = r ? '<div class="ppp-glasses" aria-label="' + r + ' of 5 glasses">' + [1, 2, 3, 4, 5].map(function (n) { return miniGlass(n <= r); }).join('') + '<span>' + esc(WORDS[r]) + '</span></div>' : '<div class="ppp-unrated">Not rated</div>';
+    var tags = (my.tags || []).length ? '<div class="ppp-tags">' + my.tags.map(function (t) { return '<span>' + esc(t) + '</span>'; }).join('') + '</div>' : '';
+    var note = my.note ? '<div class="ppp-note">' + esc(my.note).replace(/\n/g, '<br>') + '</div>' : '';
+    return '<div class="ppp-wine"><div class="ppp-bottle">' + bottleHtml(w) + '</div><div class="ppp-wbody">' +
+      '<div class="ppp-wname">' + esc(w.name) + '</div>' + (sub ? '<div class="ppp-wsub">' + esc(sub) + '</div>' : '') +
+      (origin ? '<div class="ppp-origin">' + (cc ? '<span class="ppp-flag">' + flagSvg(cc) + '</span>' : '') + esc(origin) + '</div>' : '') +
+      glasses + tags + note + '</div></div>';
+  }
+
+  function printHtml() {
+    var ws = allWines(), rated = ws.filter(function (w) { return w.my.rating; });
+    var avg = rated.length ? (rated.reduce(function (s, w) { return s + w.my.rating; }, 0) / rated.length).toFixed(1) : '–';
+    var seen = {}, flags = '', nCountries = 0;
+    ws.forEach(function (w) {
+      var k = String(w.country || '').trim(); if (!k) return;
+      var cc = countryCode(k); if (seen[cc]) return; seen[cc] = 1; nCountries++;
+      flags += '<span class="ppp-flag lg" title="' + esc(k) + '">' + flagSvg(cc) + '</span>';
+    });
+    var name = (member && (member.full_name || member.email)) || '';
+    var cover = '<section class="ppp-cover"><div class="ppp-cover-top"><small>Stanford GSB</small><h1>Wine Circle<span>Passport</span></h1></div>' +
+      '<svg class="ppp-crest" viewBox="0 0 120 120" aria-hidden="true"><g fill="none" stroke="#b08d57" stroke-width="1"><circle cx="60" cy="60" r="56"/><circle cx="60" cy="60" r="50" stroke-opacity=".5"/>' +
+      '<circle cx="49" cy="56" r="6.2"/><circle cx="62" cy="56" r="6.2"/><circle cx="75" cy="56" r="6.2"/><circle cx="55.5" cy="67.5" r="6.2"/><circle cx="68.5" cy="67.5" r="6.2"/><circle cx="62" cy="79" r="6.2"/>' +
+      '<path d="M62 49c-1-10 6-17 15-16-1 8-6 14-15 16Z"/><path d="M62 49c0-7-3-12-8-14"/></g></svg>' +
+      '<div class="ppp-cover-bottom"><div class="ppp-cover-name">' + esc(name) + '</div>' +
+      '<div class="ppp-cover-stats">' + events().length + ' event' + (events().length === 1 ? '' : 's') + ' &nbsp;·&nbsp; ' + ws.length + ' wine' + (ws.length === 1 ? '' : 's') +
+      ' &nbsp;·&nbsp; ' + nCountries + ' countr' + (nCountries === 1 ? 'y' : 'ies') + (rated.length ? ' &nbsp;·&nbsp; avg. ' + avg : '') + '</div>' +
+      (flags ? '<div class="ppp-cover-flags">' + flags + '</div>' : '') + '</div></section>';
+    // Oldest first: a passport reads like a diary.
+    var pages = events().slice().reverse().map(function (e) {
+      var meta = [fmtDate(e.event_date), e.location].filter(Boolean).map(esc).join('<span class="dot"> · </span>');
+      return '<section class="ppp-event"><div class="ppp-ehead"><div class="ppp-stamp">' + stampSvg(e.stamp) + '</div><div>' +
+        '<h2>' + esc(e.name) + '</h2><div class="ppp-emeta">' + meta + '</div>' + (e.blurb ? '<p class="ppp-blurb">' + esc(e.blurb) + '</p>' : '') + '</div></div>' +
+        '<div class="ppp-flight-label">The flight' + (e.wines.length ? ' · ' + e.wines.length + ' wine' + (e.wines.length === 1 ? '' : 's') : '') + '</div>' +
+        (e.wines.length ? e.wines.map(printWine).join('') : '<div class="ppp-empty">No wine list was recorded for this event.</div>') + '</section>';
+    }).join('');
+    return cover + pages;
+  }
+
+  function waitForImages(root) {
+    var imgs = [].slice.call(root.querySelectorAll('img')), t = new Promise(function (res) { setTimeout(res, 4000); });
+    return Promise.race([t, Promise.all(imgs.map(function (im) {
+      return im.complete ? 0 : new Promise(function (res) { im.onload = im.onerror = res; });
+    }))]);
+  }
+
+  window.exportPassportPdf = async function () {
+    if (!events().length) { toast('Nothing to export yet — attend an event first.'); return; }
+    var old = $('pp-print'); if (old) old.remove();
+    var box = document.createElement('div'); box.id = 'pp-print'; box.innerHTML = printHtml();
+    document.body.appendChild(box);
+    try { if (document.fonts && document.fonts.ready) await Promise.race([document.fonts.ready, new Promise(function (r) { setTimeout(r, 3000); })]); } catch (e) {}
+    await waitForImages(box);
+    document.body.classList.add('pp-printing');
+    var done = function () { document.body.classList.remove('pp-printing'); box.remove(); window.removeEventListener('afterprint', done); };
+    window.addEventListener('afterprint', done);
+    toast('In the print window, choose “Save as PDF”.');
+    setTimeout(function () { window.print(); }, 250);
+  };
+
   // ── Cover / lifecycle ─────────────────────────────────────────────────────
   async function loadPassport() {
     PP.loading = true; PP.loadError = '';
