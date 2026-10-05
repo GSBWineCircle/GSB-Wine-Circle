@@ -154,16 +154,15 @@ describe('passportWines validation', () => {
 
 describe('passportAccess', () => {
   const { isPassportEnabledFor: ok } = require('../services/passportAccess');
-  test('defaults to the built-in allowlist, case-insensitive', () => {
-    expect(ok('rdighe@stanford.edu', '')).toBe(true);
-    expect(ok('RDighe@Stanford.edu', undefined)).toBe(true);
-    expect(ok('rutingl@stanford.edu', '')).toBe(true);
-    expect(ok('someone@stanford.edu', '')).toBe(false);
-    expect(ok('', '')).toBe(false);
+  test('open to everyone by default', () => {
+    expect(ok('someone@stanford.edu', '')).toBe(true);
+    expect(ok('rdighe@stanford.edu', undefined)).toBe(true);
+    expect(ok('', '')).toBe(false); // but never an anonymous caller
   });
   test('env list and wildcard', () => {
     expect(ok('a@x.edu', 'a@x.edu, b@x.edu')).toBe(true);
     expect(ok('rdighe@stanford.edu', 'a@x.edu')).toBe(false);
+    expect(ok('A@X.edu', 'a@x.edu')).toBe(true);
     expect(ok('anyone@x.edu', '*')).toBe(true);
   });
 });

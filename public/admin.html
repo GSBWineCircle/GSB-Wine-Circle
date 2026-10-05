@@ -695,8 +695,10 @@
         </div>
 
         <!-- Passport: wine list for this event -->
-        <div class="section-title">Passport — Wine List <span style="text-transform:none;letter-spacing:0;font-weight:400;">(optional)</span></div>
-        <div class="card card-body" id="passport-card" style="margin-bottom:20px;">
+        <div class="section-title" id="pw-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="passport-card"
+             onclick="pwToggle()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();pwToggle();}"
+             style="cursor:pointer;user-select:none;"><span id="pw-chevron" style="display:inline-block;width:14px;">▸</span> Passport — Wine List <span style="text-transform:none;letter-spacing:0;font-weight:400;">(optional)</span></div>
+        <div class="card card-body" id="passport-card" style="margin-bottom:20px;display:none;">
           <p style="font-size:13px;color:var(--muted);margin-bottom:12px;">
             List the wines poured at this event. After the event, members who attended see it in their Passport
             with an auto-generated stamp and summary, and can rate each wine and add tasting notes. Tasting-note
@@ -1699,6 +1701,14 @@ async function saveWelcomePhotos() {
 
 /* ── Passport wine list ──────────────────────────────────────────────────── */
 let pwWines = [];
+
+// The Passport card starts collapsed every time an event page opens.
+function pwSetOpen(open) {
+  document.getElementById('passport-card').style.display = open ? '' : 'none';
+  document.getElementById('pw-chevron').textContent = open ? '▾' : '▸';
+  document.getElementById('pw-toggle').setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+function pwToggle() { pwSetOpen(document.getElementById('passport-card').style.display === 'none'); }
 let pwLoadedFor = null;
 let pwPollTimers = [];
 
@@ -1975,6 +1985,7 @@ async function openEventDetail(eventId) {
     document.getElementById('btn-delete-event').style.display = currentMember?.is_exec_team ? '' : 'none';
     document.getElementById('btn-manual-add').style.display = currentMember?.is_exec_team ? '' : 'none';
 
+    pwSetOpen(false);
     loadPassportWines(eventId);
     await loadEventSignups(eventId);
   } catch (e) {

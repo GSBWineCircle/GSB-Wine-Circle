@@ -1,13 +1,13 @@
 /**
- * Who can see the member-facing Passport. While it's being polished only the
- * emails in PASSPORT_ALLOWED_EMAILS (comma-separated; default: the built-in
- * list below) get it. Set the env var to "*" on Render to open it to everyone.
+ * Who can see the member-facing Passport: everyone by default. To limit it again
+ * (e.g. while testing), set PASSPORT_ALLOWED_EMAILS on Render to a comma-separated
+ * list of emails; "*" means everyone.
  * The admin wine-list editor is unaffected - it is admin-only anyway.
  */
 
 'use strict';
 
-const DEFAULT_ALLOWED = 'rdighe@stanford.edu,rutingl@stanford.edu';
+const DEFAULT_ALLOWED = '*';
 
 function allowedList(env = process.env.PASSPORT_ALLOWED_EMAILS) {
   return String(env == null || env === '' ? DEFAULT_ALLOWED : env)
@@ -16,9 +16,9 @@ function allowedList(env = process.env.PASSPORT_ALLOWED_EMAILS) {
 
 /** @param {string} email @param {string} [env] override for tests */
 function isPassportEnabledFor(email, env) {
+  if (!email) return false;
   const list = allowedList(env);
-  if (list.includes('*')) return true;
-  return !!email && list.includes(String(email).trim().toLowerCase());
+  return list.includes('*') || list.includes(String(email).trim().toLowerCase());
 }
 
 const VISIBILITIES = ['hidden', 'start', 'after'];
