@@ -214,8 +214,11 @@
 #pp-print * { box-sizing: border-box; }
 #pp-print h1, #pp-print h2 { font-family: var(--serif); font-weight: 500; margin: 0; }
 #pp-print .ppp-cover {
-  height: 9.55in; border-radius: 6px; position: relative; break-after: page; page-break-after: always; color: var(--brass-l);
-  background: linear-gradient(165deg, #4d1725, #43131f 60%, #370e18); padding: .9in .7in .8in;
+  /* Sized from the real printable area (100vh in print = the page box) with a hard cap, so the
+     cover fits on ONE page for any paper size or margin setting, never spilling onto a second. */
+  height: min(9in, calc(100vh - .45in)); max-height: calc(100vh - .45in); overflow: hidden;
+  border-radius: 6px; position: relative; break-after: page; page-break-after: always; break-inside: avoid; page-break-inside: avoid; color: var(--brass-l);
+  background: linear-gradient(165deg, #4d1725, #43131f 60%, #370e18); padding: min(.9in, 7vh) .7in min(.8in, 6vh);
   display: flex; flex-direction: column; align-items: center; justify-content: space-between; text-align: center;
 }
 #pp-print .ppp-cover::before { content: ""; position: absolute; inset: .26in; border: 1px solid rgba(176,141,87,.55); border-radius: 3px; }
@@ -255,3 +258,9 @@
 #pp-print .ppp-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: .09in; }
 #pp-print .ppp-tags span { font-size: 7pt; letter-spacing: .04em; padding: 2px 8px; border: 1px solid var(--line-2); border-radius: 999px; color: #4d4340; }
 #pp-print .ppp-note { margin-top: .1in; padding-left: .13in; border-left: 1.5px solid var(--brass); font-family: var(--serif); font-style: italic; font-size: 11pt; line-height: 1.38; color: #3d3431; }
+
+@media print and (max-height: 9in) {
+  #pp-print .ppp-cover-top h1 { font-size: 30pt; margin-top: .18in; }
+  #pp-print .ppp-crest { width: 1.2in; height: 1.2in; }
+  #pp-print .ppp-cover-name { font-size: 21pt; }
+}
