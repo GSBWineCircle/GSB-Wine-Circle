@@ -1379,6 +1379,8 @@ let sessionToken = localStorage.getItem('admin_token') || null;
 let currentMember = null;
 let currentPage = 'events';
 let currentEventId = null;
+let currentEventDate = null;   // for UI rules that depend on how close the event is
+let declineGraceHours = 24;     // from public settings; mirrors the server's grace window
 let allMembers = []; // for client-side filter
 let currentSettings = {}; // key -> value, loaded once on app start
 let auditPage = 1, emailLogPage = 1, ledgerPage = 1;
@@ -1964,6 +1966,8 @@ async function openEventDetail(eventId) {
   try {
     const evRes = await api('GET', `/events/${eventId}`);
     const ev = evRes.event || evRes;
+    currentEventDate = ev.event_date || null;
+    fetch('/api/settings/public').then(r => r.json()).then(p => { declineGraceHours = parseInt(p.decline_grace_window_hours) || 24; }).catch(() => {});
     document.getElementById('event-detail-name').textContent = ev.name;
     document.getElementById('event-detail-badge').innerHTML = `<span class="badge badge-${ev.status.toLowerCase()}">${ev.status}</span>`;
 
@@ -2032,7 +2036,9 @@ async function loadEventSignups(eventId) {
         <td>
           <div class="td-actions">
             ${s.status === 'Waitlist' ? `<button class="btn-secondary btn-sm" onclick="promoteSignup('${s.signup_id}')">Promote</button>` : ''}
-            ${s.status === 'Invited' ? `<button class="btn-secondary btn-sm" onclick="demoteSignup('${s.signup_id}')">Remove from Invited</button>` : ''}
+            ${s.status === 'Invited' ? (canRemoveInvitedNow()
+              ? `<button class="btn-secondary btn-sm" onclick="demoteSignup('${s.signup_id}')">Remove from Invited</button>`
+              : `<button class="btn-secondary btn-sm" disabled title="Within ${declineGraceHours} hours of the event start, only the Exec Team can remove a member from Invited.">Remove from Invited</button>`) : ''}
             ${s.status === 'Invited' && currentMember?.is_exec_team ? `<button class="btn-danger btn-sm" onclick="markDropped('${s.signup_id}', '${esc(s.member_name).replace(/'/g, '&#39;')}')">Mark Dropped (waive fee)</button>` : ''}
             ${s.status === 'Pending' && currentMember?.is_exec_team ? `<button class="btn-danger btn-sm" onclick="removeFromLottery('${s.signup_id}', '${esc(s.member_name).replace(/'/g, '&#39;')}')">Remove from lottery</button>` : ''}
           </div>
@@ -2240,6 +2246,13 @@ async function removeFromLottery(signupId, name) {
       toast('Error: ' + e.message, 'error');
     }
   });
+}
+
+// Mirrors the server rule: non-exec admins can't remove Invited members once the
+// event is within the grace window (the server enforces it regardless).
+function canRemoveInvitedNow() {
+  if (currentMember?.is_exec_team || !currentEventDate) return true;
+  return (new Date(currentEventDate) - new Date()) >= declineGraceHours * 3600 * 1000;
 }
 
 async function demoteSignup(signupId) {

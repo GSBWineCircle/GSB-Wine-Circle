@@ -17,6 +17,7 @@ const {
   classifyFinalizeSignups,
   isMemberBlocked,
   canManualAddToEvent,
+  canRemoveFromInvited,
   isValidBirthDateInput,
   isValidBirthYear,
   extractBirthYear,
@@ -676,5 +677,26 @@ describe('hasBirthYearPriority', () => {
 
   test('false: member is null/undefined', () => {
     expect(hasBirthYearPriority(null, 1996)).toBe(false);
+  });
+});
+
+describe('canRemoveFromInvited (non-exec 24h lockout)', () => {
+  const now = new Date('2026-10-06T12:00:00Z');
+  const inHours = h => new Date(now.getTime() + h * 3600e3);
+  test('exec can always remove', () => {
+    expect(canRemoveFromInvited({ isExec: true, eventDate: inHours(1), graceHours: 24, now })).toBe(true);
+    expect(canRemoveFromInvited({ isExec: true, eventDate: inHours(-5), graceHours: 24, now })).toBe(true);
+  });
+  test('non-exec: allowed before the window, blocked from 24h out and after the start', () => {
+    expect(canRemoveFromInvited({ isExec: false, eventDate: inHours(48), graceHours: 24, now })).toBe(true);
+    expect(canRemoveFromInvited({ isExec: false, eventDate: inHours(24), graceHours: 24, now })).toBe(true);   // exactly 24h out
+    expect(canRemoveFromInvited({ isExec: false, eventDate: inHours(23.9), graceHours: 24, now })).toBe(false);
+    expect(canRemoveFromInvited({ isExec: false, eventDate: inHours(0), graceHours: 24, now })).toBe(false);
+    expect(canRemoveFromInvited({ isExec: false, eventDate: inHours(-3), graceHours: 24, now })).toBe(false);
+  });
+  test('uses the configured grace window; defaults to 24; no date = allowed', () => {
+    expect(canRemoveFromInvited({ isExec: false, eventDate: inHours(30), graceHours: '48', now })).toBe(false);
+    expect(canRemoveFromInvited({ isExec: false, eventDate: inHours(23), now })).toBe(false);
+    expect(canRemoveFromInvited({ isExec: false, eventDate: null, graceHours: 24, now })).toBe(true);
   });
 });

@@ -11,6 +11,7 @@ const {
   isMemberBlocked,
   shouldAutoPromote,
   canManualAddToEvent,
+  canRemoveFromInvited,
 } = require('../services/signupLogic');
 
 const router = express.Router();
@@ -384,9 +385,9 @@ router.post('/:id/demote', requireAdmin, async (req, res) => {
   try {
     await client.query('BEGIN');
     const { rows: existing } = await client.query(
-      `SELECT s.*, e.auto_invite_enabled
+      `SELECT s.*, e.auto_invite_enabled, e.event_date
        FROM signups s JOIN events e ON e.event_id = s.event_id
-       WHERE s.signup_id = $1 FOR UPDATE`,
+       WHERE s.signup_id = $1 FOR UPDATE OF s`,
       [req.params.id]
     );
     if (!existing.length) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Signup not found' }); }
@@ -394,6 +395,14 @@ router.post('/:id/demote', requireAdmin, async (req, res) => {
     if (s.status !== 'Invited') {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: 'Signup is not currently Invited' });
+    }
+    // Inside the grace window only the Exec Team may do this (non-exec admins
+    // would otherwise be able to dodge the late-decline flake rule).
+    const settings = await getSettings(client);
+    if (!canRemoveFromInvited({ isExec: !!req.isExecTeam, eventDate: s.event_date, graceHours: settings.decline_grace_window_hours })) {
+      await client.query('ROLLBACK');
+      const hrs = parseInt(settings.decline_grace_window_hours) || 24;
+      return res.status(403).json({ error: `Within ${hrs} hours of the event start, only the Exec Team can remove a member from Invited.` });
     }
 
     const { rows } = await client.query(

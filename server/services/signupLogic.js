@@ -42,6 +42,24 @@ function determineDeclineOutcome(signup, settings, now) {
 }
 
 /**
+ * Whether a manager may take an Invited member off the invite list right now.
+ * Exec Team always can. Other admins can't once the event is inside the grace
+ * window - from `graceHours` before it starts (and for good once it has
+ * started) - the same window that makes a member's own decline a Flake; at
+ * that point only Exec can resolve it (e.g. via Mark Dropped).
+ * @param {{isExec: boolean, eventDate: *, graceHours?: number|string, now?: Date}} p
+ * @returns {boolean}
+ */
+function canRemoveFromInvited({ isExec, eventDate, graceHours, now = new Date() }) {
+  if (isExec) return true;
+  if (!eventDate) return true;
+  const start = new Date(eventDate);
+  if (isNaN(start.getTime())) return true;
+  const hours = parseInt(graceHours) || 24;
+  return (start - now) >= hours * 60 * 60 * 1000;
+}
+
+/**
  * Assign lottery ranks and statuses to a list of pending signups.
  *
  * @param {Array<{signup_id: string}>} pendingSignups — already shuffled or in desired order
@@ -220,6 +238,7 @@ function hasBirthYearPriority(member, targetYear) {
 module.exports = {
   computeBalance,
   determineDeclineOutcome,
+  canRemoveFromInvited,
   assignLotteryResults,
   assignLotteryResultsWithPriority,
   shouldAutoPromote,
