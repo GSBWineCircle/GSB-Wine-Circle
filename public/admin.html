@@ -943,12 +943,13 @@
                 <th>Time</th>
                 <th>Admin</th>
                 <th>Action</th>
+                <th>Member affected</th>
                 <th>Target</th>
                 <th>ID</th>
               </tr>
             </thead>
             <tbody id="audit-tbody">
-              <tr class="loading-row"><td colspan="5"><span class="spinner"></span> Loading…</td></tr>
+              <tr class="loading-row"><td colspan="6"><span class="spinner"></span> Loading…</td></tr>
             </tbody>
           </table>
         </div>
@@ -3149,13 +3150,13 @@ async function savePayment() {
 /* ── Audit Log ───────────────────────────────────────────────────────────── */
 async function loadAudit() {
   const tbody = document.getElementById('audit-tbody');
-  tbody.innerHTML = '<tr class="loading-row"><td colspan="5"><span class="spinner"></span> Loading…</td></tr>';
+  tbody.innerHTML = '<tr class="loading-row"><td colspan="6"><span class="spinner"></span> Loading…</td></tr>';
   try {
     const offset = (auditPage - 1) * PAGE_SIZE;
     const res = await api('GET', `/audit?limit=${PAGE_SIZE}&offset=${offset}`);
     const entries = res.log || (Array.isArray(res) ? res : []);
     if (!entries.length) {
-      tbody.innerHTML = '<tr class="loading-row"><td colspan="5" style="color:var(--muted)">No audit entries.</td></tr>';
+      tbody.innerHTML = '<tr class="loading-row"><td colspan="6" style="color:var(--muted)">No audit entries.</td></tr>';
       renderPagination('audit-pagination', auditPage, 0);
       return;
     }
@@ -3164,6 +3165,9 @@ async function loadAudit() {
         <td class="monospace" style="font-size:11px;white-space:nowrap">${fmtDateTime(e.created_at)}</td>
         <td>${esc(e.admin_email)}</td>
         <td>${esc(e.action)}</td>
+        <td>${e.affected
+          ? `<strong>${esc(e.affected.name || e.affected.email)}</strong>${e.affected.name && e.affected.email ? `<div class="text-muted" style="font-size:11px">${esc(e.affected.email)}</div>` : ''}${e.affected.note ? `<div class="text-muted" style="font-size:11px">${esc(e.affected.note)}</div>` : ''}`
+          : '<span class="text-muted">—</span>'}</td>
         <td class="text-muted">${esc(e.target_table)}</td>
         <td class="monospace" style="font-size:11px">${esc(e.target_id)}</td>
       </tr>
@@ -3171,7 +3175,7 @@ async function loadAudit() {
     // Audit uses server-side paging; show next if full page returned
     renderPagination('audit-pagination', auditPage, entries.length < PAGE_SIZE ? ((auditPage - 1) * PAGE_SIZE + entries.length) : (auditPage * PAGE_SIZE + 1));
   } catch (e) {
-    tbody.innerHTML = `<tr class="loading-row"><td colspan="5" class="text-danger">Error: ${esc(e.message)}</td></tr>`;
+    tbody.innerHTML = `<tr class="loading-row"><td colspan="6" class="text-danger">Error: ${esc(e.message)}</td></tr>`;
   }
 }
 

@@ -251,3 +251,20 @@ describe('passport event visibility', () => {
     expect(vis('hidden', 'Invited', past)).toBe(false);
   });
 });
+
+describe('audit affected member', () => {
+  const { affectedFrom } = require('../services/auditView');
+  test('uses the joined live row', () => {
+    expect(affectedFrom({ action: 'DemoteFromInvited', affected_name: 'Ann', affected_email: 'a@x.edu' })).toEqual({ name: 'Ann', email: 'a@x.edu', note: '' });
+  });
+  test('falls back to the recorded snapshot (e.g. a signup removed from the lottery)', () => {
+    expect(affectedFrom({ action: 'RemoveFromLottery', before_state: { member_name: 'Bo', member_email: 'b@x.edu' } })).toEqual({ name: 'Bo', email: 'b@x.edu', note: '' });
+  });
+  test('bulk delete shows a count; partner links name the partner; nothing -> null', () => {
+    expect(affectedFrom({ action: 'BulkDeleteMembers', before_state: { deleted: [{}, {}, {}] } }).name).toBe('3 members');
+    expect(affectedFrom({ action: 'BulkDeleteMembers', before_state: { deleted: [{}] } }).name).toBe('1 member');
+    expect(affectedFrom({ action: 'LinkPartner', affected_name: 'Ann', affected_email: 'a@x.edu', partner_name: 'Cy' }).note).toBe('with Cy');
+    expect(affectedFrom({ action: 'UpdateSetting', before_state: { value: '1' }, after_state: { value: '2' } })).toBeNull();
+    expect(affectedFrom({ action: 'CreateEvent', after_state: { name: 'X' } })).toBeNull();
+  });
+});
