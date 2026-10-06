@@ -2039,7 +2039,9 @@ async function loadEventSignups(eventId) {
             ${s.status === 'Invited' ? (canRemoveInvitedNow()
               ? `<button class="btn-secondary btn-sm" onclick="demoteSignup('${s.signup_id}')">Remove from Invited</button>`
               : `<button class="btn-secondary btn-sm" disabled title="Within ${declineGraceHours} hours of the event start, only the Exec Team can remove a member from Invited.">Remove from Invited</button>`) : ''}
-            ${s.status === 'Invited' && currentMember?.is_exec_team ? `<button class="btn-danger btn-sm" onclick="markDropped('${s.signup_id}', '${esc(s.member_name).replace(/'/g, '&#39;')}')">Mark Dropped (waive fee)</button>` : ''}
+            ${s.status === 'Invited' ? (canRemoveInvitedNow()
+              ? `<button class="btn-danger btn-sm" onclick="markDropped('${s.signup_id}', '${esc(s.member_name).replace(/'/g, '&#39;')}')">Mark Dropped (waive fee)</button>`
+              : `<button class="btn-danger btn-sm" disabled title="Within ${declineGraceHours} hours of the event start, only the Exec Team can mark a member as dropped.">Mark Dropped (waive fee)</button>`) : ''}
             ${s.status === 'Pending' && currentMember?.is_exec_team ? `<button class="btn-danger btn-sm" onclick="removeFromLottery('${s.signup_id}', '${esc(s.member_name).replace(/'/g, '&#39;')}')">Remove from lottery</button>` : ''}
           </div>
         </td>
@@ -2273,7 +2275,7 @@ async function demoteSignup(signupId) {
 async function markDropped(signupId, name) {
   confirm(
     'Mark as Dropped (waive fee)',
-    `Mark ${name} as Dropped instead of a late decline? This skips the no-show fee entirely, even if it's within the usual grace window. ` +
+    `Mark ${name} as Dropped instead of a late decline? This skips the no-show fee entirely. ` +
     `If auto-promotion is on for this event, the next waitlisted member will be invited to fill the spot.`,
     'btn-danger',
     async () => {

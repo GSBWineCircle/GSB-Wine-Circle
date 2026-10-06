@@ -432,7 +432,7 @@ router.post('/:id/demote', requireAdmin, async (req, res) => {
   }
 });
 
-// POST /api/signups/:id/mark-dropped — Exec Team: mark a lottery winner as a
+// POST /api/signups/:id/mark-dropped — Admin: mark a lottery winner as a
 // clean Dropped (no fee), bypassing the normal decline-timing rule that would
 // otherwise charge a late decline inside the grace window as a Flake. For
 // administrative exceptions - a genuine emergency, a scheduling mistake on
@@ -440,12 +440,15 @@ router.post('/:id/demote', requireAdmin, async (req, res) => {
 // having to change the grace-window setting for everyone. The outcome is
 // exactly what a member's own on-time decline would produce: Dropped, no
 // charge, and the next waitlisted member (if auto-invite is on) promoted.
-router.post('/:id/mark-dropped', requireAdmin, requireExecTeam, async (req, res) => {
+// Exec Team can do this at any time (including inside the grace window, where
+// it waives the fee); other admins only while the event is still more than the
+// grace window away - where it is the same as an on-time decline anyway.
+router.post('/:id/mark-dropped', requireAdmin, async (req, res) => {
   const client = await db.connect();
   try {
     await client.query('BEGIN');
     const { rows: existing } = await client.query(
-      `SELECT s.*, e.auto_invite_enabled
+      `SELECT s.*, e.auto_invite_enabled, e.event_date
        FROM signups s JOIN events e ON e.event_id = s.event_id
        WHERE s.signup_id = $1 FOR UPDATE OF s`,
       [req.params.id]
@@ -455,6 +458,12 @@ router.post('/:id/mark-dropped', requireAdmin, requireExecTeam, async (req, res)
     if (s.status !== 'Invited') {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: 'Only a currently Invited signup can be marked dropped this way.' });
+    }
+    const settings = await getSettings(client);
+    if (!canRemoveFromInvited({ isExec: !!req.isExecTeam, eventDate: s.event_date, graceHours: settings.decline_grace_window_hours })) {
+      await client.query('ROLLBACK');
+      const hrs = parseInt(settings.decline_grace_window_hours) || 24;
+      return res.status(403).json({ error: `Within ${hrs} hours of the event start, only the Exec Team can mark a member as dropped.` });
     }
 
     await client.query(
@@ -469,7 +478,7 @@ router.post('/:id/mark-dropped', requireAdmin, requireExecTeam, async (req, res)
     }
 
     await client.query('COMMIT');
-    await audit(req.member.email, 'MarkDroppedByExec', 'signups', req.params.id,
+    await audit(req.member.email, req.isExecTeam ? 'MarkDroppedByExec' : 'MarkDroppedByAdmin', 'signups', req.params.id,
       { status: 'Invited' },
       { status: 'Dropped', waivedFlakeFee: true, promoted: promoted ? promoted.signup_id : null });
     return res.json({ ok: true, promoted: !!promoted });
