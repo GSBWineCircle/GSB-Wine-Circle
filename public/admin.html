@@ -1337,6 +1337,25 @@
   </div>
 </div>
 
+<!-- Correct attendance (Exec Team, finalized events) -->
+<div class="modal-overlay" id="modal-correct-att">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="correct-att-title">Correct attendance</h3>
+      <button class="modal-close" onclick="closeModal('modal-correct-att')">×</button>
+    </div>
+    <div class="modal-body">
+      <p id="correct-att-msg" style="margin-bottom:12px;font-size:14px;"></p>
+      <label for="correct-att-reason" style="font-size:12px;font-weight:600;">Reason (optional, saved in the audit log)</label>
+      <textarea id="correct-att-reason" rows="2" maxlength="300" placeholder="e.g. ticked the wrong name at check-in"></textarea>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" onclick="closeModal('modal-correct-att')">Cancel</button>
+      <button class="btn-primary" id="correct-att-btn" onclick="submitCorrectAttendance()">Confirm</button>
+    </div>
+  </div>
+</div>
+
 <!-- Confirm modal -->
 <div class="modal-overlay" id="modal-confirm">
   <div class="modal" style="max-width:400px;">
@@ -1380,7 +1399,8 @@ let sessionToken = localStorage.getItem('admin_token') || null;
 let currentMember = null;
 let currentPage = 'events';
 let currentEventId = null;
-let currentEventDate = null;   // for UI rules that depend on how close the event is
+let currentEventDate = null;
+let currentEventStatus = null;   // for UI rules that depend on how close the event is
 let declineGraceHours = 24;     // from public settings; mirrors the server's grace window
 let allMembers = []; // for client-side filter
 let currentSettings = {}; // key -> value, loaded once on app start
@@ -1968,6 +1988,7 @@ async function openEventDetail(eventId) {
     const evRes = await api('GET', `/events/${eventId}`);
     const ev = evRes.event || evRes;
     currentEventDate = ev.event_date || null;
+    currentEventStatus = ev.status || null;
     fetch('/api/settings/public').then(r => r.json()).then(p => { declineGraceHours = parseInt(p.decline_grace_window_hours) || 24; }).catch(() => {});
     document.getElementById('event-detail-name').textContent = ev.name;
     document.getElementById('event-detail-badge').innerHTML = `<span class="badge badge-${ev.status.toLowerCase()}">${ev.status}</span>`;
@@ -2116,6 +2137,32 @@ async function loadAttendance() {
   try {
     const attRes = await api('GET', `/events/${currentEventId}/signups`);
     const signups = attRes.signups || attRes;
+
+    // Finalized: fees and statuses are settled, so the plain checkboxes would leave them inconsistent.
+    // Exec Team can correct one person at a time (adjusting the flake fee); others can roll the whole event back.
+    if (currentEventStatus === 'Completed') {
+      const rows = signups.filter(s => s.status === 'Attended' || (s.status === 'Flaked' && s.finalized_from === 'Invited') || (s.status === 'Lost' && s.finalized_from === 'Waitlist'));
+      const isExec = !!currentMember?.is_exec_team;
+      const banner = `<div class="card card-body" style="margin-bottom:12px;font-size:13px;">
+        <strong>This event is finalized.</strong> ${isExec
+          ? 'To fix a mistake, correct that person below: the flake fee is waived or charged automatically, and the change is recorded in the audit log.'
+          : 'Only the Exec Team can correct one person\'s attendance now. You can also use <em>Roll Back Finalize</em> to reopen the whole event.'}
+      </div>`;
+      if (!rows.length) { list.innerHTML = banner + '<div class="empty-state"><div class="empty-icon">📋</div><p>No attendance to show.</p></div>'; return; }
+      const label = { Attended: 'Attended', Flaked: 'No-show (fee charged)', Lost: 'Waitlist, did not attend' };
+      list.innerHTML = banner + rows.map(s => `
+        <div class="attendance-item ${s.status === 'Attended' ? 'attended' : ''}" style="display:flex;align-items:center;gap:12px;justify-content:space-between;">
+          <div>
+            <div class="name">${esc(s.member_name)}</div>
+            <div class="sub">${esc(s.member_email)} · <span class="badge badge-${s.status.toLowerCase()}">${label[s.status]}</span></div>
+          </div>
+          ${isExec ? (s.status === 'Attended'
+            ? `<button class="btn-danger btn-sm" onclick="openCorrectAttendance('${s.signup_id}', '${esc(s.member_name).replace(/'/g, '&#39;')}', false)">Mark as no-show</button>`
+            : `<button class="btn-success btn-sm" onclick="openCorrectAttendance('${s.signup_id}', '${esc(s.member_name).replace(/'/g, '&#39;')}', true)">Mark as attended</button>`) : ''}
+        </div>`).join('');
+      return;
+    }
+
     const eligible = signups.filter(s => ['Invited', 'Waitlist', 'Attended'].includes(s.status));
     if (!eligible.length) {
       list.innerHTML = '<div class="empty-state"><div class="empty-icon">📋</div><p>No invited members yet.</p></div>';
@@ -2134,6 +2181,36 @@ async function loadAttendance() {
   } catch (e) {
     list.innerHTML = `<div class="text-danger" style="padding:20px">Error: ${esc(e.message)}</div>`;
   }
+}
+
+// Exec-only retroactive correction (after the event was finalized).
+let correctAtt = null;
+function openCorrectAttendance(signupId, name, attended) {
+  correctAtt = { signupId, attended };
+  document.getElementById('correct-att-title').textContent = attended ? 'Mark as attended' : 'Mark as no-show';
+  document.getElementById('correct-att-msg').textContent = attended
+    ? `Mark ${name} as having attended? Their flake fee for this event will be waived and they will be unblocked if it was their only balance.`
+    : `Mark ${name} as a no-show? They will be charged the flake fee for this event (if they were invited) and may be blocked from future lotteries until it is paid or waived.`;
+  document.getElementById('correct-att-reason').value = '';
+  document.getElementById('correct-att-btn').textContent = attended ? 'Mark as attended' : 'Mark as no-show';
+  openModal('modal-correct-att');
+}
+async function submitCorrectAttendance() {
+  if (!correctAtt) return;
+  const btn = document.getElementById('correct-att-btn'); btn.disabled = true;
+  try {
+    const r = await api('POST', `/signups/${correctAtt.signupId}/correct-attendance`, {
+      attended: correctAtt.attended, reason: document.getElementById('correct-att-reason').value.trim(),
+    });
+    closeModal('modal-correct-att');
+    const feeMsg = r.fee.action === 'waived' ? ` Flake fee of $${r.fee.amount} waived.` : r.fee.action === 'charged' ? ` Flake fee of $${r.fee.amount} charged.` : '';
+    toast('Attendance corrected.' + feeMsg + ' Use Push Portal Updates to update the member\'s view.', 'success');
+    if (r.refundDue > 0) setTimeout(() => toast(`Note: this member had already paid — $${r.refundDue.toFixed(2)} may need to be refunded outside the app.`, ''), 600);
+    await loadAttendance();
+    loadEventSignups(currentEventId);
+  } catch (e) {
+    toast('Error: ' + e.message, 'error');
+  } finally { btn.disabled = false; }
 }
 
 async function markAttendance(signupId, attended) {

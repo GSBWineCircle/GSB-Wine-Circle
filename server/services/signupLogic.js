@@ -22,6 +22,39 @@ function computeBalance(ledgerRows) {
 }
 
 /**
+ * Plan a retroactive attendance correction for one signup on a FINALIZED
+ * event (the finalize run turned unmarked Invited members into Flaked + fee,
+ * and unmarked Waitlist members into Lost). Pure: no DB access.
+ *
+ * @param {{status: string, pre_attendance_status?: string|null, finalized_from?: string|null}} signup
+ * @param {boolean} attended the corrected outcome
+ * @returns {{ok: true, newStatus: string, preAttendance: string|null, finalizedFrom: string|null, fee: 'charge'|'waive'|'none'}
+ *          | {ok: false, error: string}}
+ */
+function planAttendanceCorrection(signup, attended) {
+  const st = signup.status;
+  if (attended) {
+    if (st === 'Attended') return { ok: false, error: 'This member is already recorded as attended.' };
+    if (st === 'Flaked' && signup.finalized_from === 'Invited') {
+      return { ok: true, newStatus: 'Attended', preAttendance: 'Invited', finalizedFrom: null, fee: 'waive' };
+    }
+    if (st === 'Lost' && signup.finalized_from === 'Waitlist') {
+      return { ok: true, newStatus: 'Attended', preAttendance: 'Waitlist', finalizedFrom: null, fee: 'none' };
+    }
+    return { ok: false, error: 'Only no-shows (or waitlisted members) recorded when the event was finalized can be corrected to attended. A late decline is not a no-show.' };
+  }
+  if (st === 'Attended') {
+    // Mirror finalize: an unmarked Invited member flakes (fee), an unmarked Waitlist member is just Lost.
+    if (signup.pre_attendance_status === 'Waitlist') {
+      return { ok: true, newStatus: 'Lost', preAttendance: null, finalizedFrom: 'Waitlist', fee: 'none' };
+    }
+    return { ok: true, newStatus: 'Flaked', preAttendance: null, finalizedFrom: 'Invited', fee: 'charge' };
+  }
+  if (st === 'Flaked' || st === 'Lost') return { ok: false, error: 'This member is already recorded as not attended.' };
+  return { ok: false, error: 'Only attended or no-show members can be corrected.' };
+}
+
+/**
  * Decide whether a decline is a flake (late) or a clean drop.
  *
  * @param {object} signup          — must have .status and .event_date
@@ -239,6 +272,7 @@ module.exports = {
   computeBalance,
   determineDeclineOutcome,
   canRemoveFromInvited,
+  planAttendanceCorrection,
   assignLotteryResults,
   assignLotteryResultsWithPriority,
   shouldAutoPromote,

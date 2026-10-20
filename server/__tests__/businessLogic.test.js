@@ -18,6 +18,7 @@ const {
   isMemberBlocked,
   canManualAddToEvent,
   canRemoveFromInvited,
+  planAttendanceCorrection,
   isValidBirthDateInput,
   isValidBirthYear,
   extractBirthYear,
@@ -698,5 +699,31 @@ describe('canRemoveFromInvited (non-exec 24h lockout)', () => {
     expect(canRemoveFromInvited({ isExec: false, eventDate: inHours(30), graceHours: '48', now })).toBe(false);
     expect(canRemoveFromInvited({ isExec: false, eventDate: inHours(23), now })).toBe(false);
     expect(canRemoveFromInvited({ isExec: false, eventDate: null, graceHours: 24, now })).toBe(true);
+  });
+});
+
+describe('planAttendanceCorrection (retroactive, finalized events)', () => {
+  test('no-show -> attended waives the fee and clears finalized_from', () => {
+    expect(planAttendanceCorrection({ status: 'Flaked', finalized_from: 'Invited' }, true))
+      .toEqual({ ok: true, newStatus: 'Attended', preAttendance: 'Invited', finalizedFrom: null, fee: 'waive' });
+  });
+  test('lost waitlister -> attended has no fee', () => {
+    expect(planAttendanceCorrection({ status: 'Lost', finalized_from: 'Waitlist' }, true))
+      .toEqual({ ok: true, newStatus: 'Attended', preAttendance: 'Waitlist', finalizedFrom: null, fee: 'none' });
+  });
+  test('attended -> no-show flakes with a fee (invited) or is Lost without one (waitlist)', () => {
+    expect(planAttendanceCorrection({ status: 'Attended', pre_attendance_status: 'Invited' }, false))
+      .toEqual({ ok: true, newStatus: 'Flaked', preAttendance: null, finalizedFrom: 'Invited', fee: 'charge' });
+    expect(planAttendanceCorrection({ status: 'Attended', pre_attendance_status: null }, false).fee).toBe('charge');
+    expect(planAttendanceCorrection({ status: 'Attended', pre_attendance_status: 'Waitlist' }, false))
+      .toEqual({ ok: true, newStatus: 'Lost', preAttendance: null, finalizedFrom: 'Waitlist', fee: 'none' });
+  });
+  test('rejects no-ops and things that are not attendance errors', () => {
+    expect(planAttendanceCorrection({ status: 'Attended' }, true).ok).toBe(false);
+    expect(planAttendanceCorrection({ status: 'Flaked', finalized_from: 'Invited' }, false).ok).toBe(false);
+    expect(planAttendanceCorrection({ status: 'Lost', finalized_from: 'Waitlist' }, false).ok).toBe(false);
+    expect(planAttendanceCorrection({ status: 'Flaked', finalized_from: null }, true).ok).toBe(false); // late decline, not a no-show
+    expect(planAttendanceCorrection({ status: 'Dropped' }, true).ok).toBe(false);
+    expect(planAttendanceCorrection({ status: 'Pending' }, false).ok).toBe(false);
   });
 });

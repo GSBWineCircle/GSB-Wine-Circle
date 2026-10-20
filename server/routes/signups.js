@@ -12,6 +12,7 @@ const {
   shouldAutoPromote,
   canManualAddToEvent,
   canRemoveFromInvited,
+  planAttendanceCorrection,
 } = require('../services/signupLogic');
 
 const router = express.Router();
@@ -307,10 +308,18 @@ router.post('/:id/attendance', requireAdmin, async (req, res) => {
   try {
     await client.query('BEGIN');
     const { rows: existing } = await client.query(
-      'SELECT * FROM signups WHERE signup_id = $1 FOR UPDATE', [req.params.id]
+      `SELECT s.*, e.status AS event_status FROM signups s JOIN events e ON e.event_id = s.event_id
+       WHERE s.signup_id = $1 FOR UPDATE OF s`, [req.params.id]
     );
     if (!existing.length) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Signup not found' }); }
     const s = existing[0];
+    // Once finalized, fees and statuses have been settled from the attendance marks, so a bare
+    // toggle would leave them inconsistent. Corrections go through the Exec-only endpoint below
+    // (or an event-wide Roll Back Finalize).
+    if (s.event_status === 'Completed') {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'This event is finalized. An Exec Team member can correct one person\'s attendance, or you can Roll Back Finalize.' });
+    }
 
     let newStatus, newPreStatus;
     if (attended) {
@@ -332,6 +341,102 @@ router.post('/:id/attendance', requireAdmin, async (req, res) => {
     return res.json({ signup: rows[0] });
   } catch (err) {
     await client.query('ROLLBACK');
+    console.error(err);
+    res.status(500).json({ error: 'Internal error' });
+  } finally {
+    client.release();
+  }
+});
+
+// POST /api/signups/:id/correct-attendance — Exec Team: fix one person's
+// attendance AFTER the event was finalized (e.g. a VP ticked the wrong box).
+// Body: { attended: boolean, reason?: string }
+//  - no-show -> attended: status becomes Attended and the flake fee is reversed
+//    with a Waiver entry (the charge is never deleted).
+//  - attended -> no-show: becomes Flaked and the flake fee is charged (or Lost,
+//    with no fee, if they had been on the waitlist), exactly as finalize would.
+// Nothing is emailed; the member's portal updates on the next Push Portal Updates.
+router.post('/:id/correct-attendance', requireAdmin, requireExecTeam, async (req, res) => {
+  const { attended } = req.body || {};
+  if (typeof attended !== 'boolean') return res.status(400).json({ error: 'attended (true/false) required' });
+  const reason = typeof req.body.reason === 'string' ? req.body.reason.trim().slice(0, 300) : '';
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: existing } = await client.query(
+      `SELECT s.*, e.status AS event_status, e.name AS event_name
+       FROM signups s JOIN events e ON e.event_id = s.event_id
+       WHERE s.signup_id = $1 FOR UPDATE OF s`, [req.params.id]
+    );
+    if (!existing.length) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Signup not found' }); }
+    const s = existing[0];
+    if (s.event_status !== 'Completed') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'This event is not finalized yet - use the normal attendance checkboxes.' });
+    }
+    const plan = planAttendanceCorrection(s, attended);
+    if (!plan.ok) { await client.query('ROLLBACK'); return res.status(400).json({ error: plan.error }); }
+
+    await client.query(
+      `UPDATE signups SET status = $1, pre_attendance_status = $2, finalized_from = $3,
+              attended_marked_at = NOW(), marked_by = $4
+       WHERE signup_id = $5`,
+      [plan.newStatus, plan.preAttendance, plan.finalizedFrom, req.member.email, s.signup_id]
+    );
+
+    const note = reason ? ` Reason: ${reason}` : '';
+    let feeResult = { action: 'none', amount: 0 };
+    if (plan.fee === 'charge') {
+      const settings = await getSettings(client);
+      const amount = parseFloat(settings.flake_fee_amount) || 30;
+      await client.query(
+        `INSERT INTO fee_ledger (ledger_id, member_id, event_id, event_name, type, amount, recorded_by, notes)
+         VALUES ($1, $2, $3, $4, 'Charge', $5, $6, $7)`,
+        ['l_' + uuidv4().replace(/-/g, ''), s.member_id, s.event_id, s.event_name, amount, req.member.email,
+         `Flake at event "${s.event_name}" (attendance corrected by ${req.member.email}).${note}`]
+      );
+      feeResult = { action: 'charged', amount };
+    } else if (plan.fee === 'waive') {
+      // Waive the flake charge unless it has already been waived (e.g. manually).
+      const { rows: led } = await client.query(
+        `SELECT type, amount, notes, occurred_at FROM fee_ledger WHERE member_id = $1 AND event_id = $2 ORDER BY occurred_at`,
+        [s.member_id, s.event_id]
+      );
+      const charges = led.filter(r => r.type === 'Charge' && /^Flake at event /.test(r.notes || ''));
+      const waivers = led.filter(r => r.type === 'Waiver');
+      if (charges.length > waivers.length) {
+        const amount = charges[charges.length - 1].amount;
+        await client.query(
+          `INSERT INTO fee_ledger (ledger_id, member_id, event_id, event_name, type, amount, recorded_by, notes)
+           VALUES ($1, $2, $3, $4, 'Waiver', $5, $6, $7)`,
+          ['l_' + uuidv4().replace(/-/g, ''), s.member_id, s.event_id, s.event_name, amount, req.member.email,
+           `Waived: attendance corrected to Attended at "${s.event_name}" by ${req.member.email}.${note}`]
+        );
+        feeResult = { action: 'waived', amount: parseFloat(amount) };
+      }
+    }
+
+    const balance = await recomputeBalance(client, s.member_id);
+    // Balances floor at 0, so a member who had ALREADY PAID the fee shows no credit - flag it so
+    // the Exec Team can refund them outside the app.
+    let refundDue = 0;
+    if (feeResult.action === 'waived') {
+      const { rows: all } = await client.query('SELECT type, amount FROM fee_ledger WHERE member_id = $1', [s.member_id]);
+      const net = all.reduce((t, r) => {
+        const a = Math.abs(parseFloat(r.amount)) || 0, ty = (r.type || '').toLowerCase();
+        return t + (ty === 'charge' ? a : (ty === 'payment' || ty === 'waiver') ? -a : 0);
+      }, 0);
+      if (net < 0) refundDue = -net;
+    }
+
+    await client.query('COMMIT');
+    await audit(req.member.email, 'CorrectAttendance', 'signups', s.signup_id,
+      { status: s.status },
+      { status: plan.newStatus, fee: feeResult.action, amount: feeResult.amount, reason: reason || null, refundDue: refundDue || null });
+    return res.json({ ok: true, status: plan.newStatus, fee: feeResult, balance, refundDue });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
     console.error(err);
     res.status(500).json({ error: 'Internal error' });
   } finally {
