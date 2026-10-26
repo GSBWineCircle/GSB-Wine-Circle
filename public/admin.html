@@ -731,7 +731,7 @@
         <div id="tab-signups" class="tab-panel active">
           <div class="stat-grid" id="event-signup-stats"></div>
           <div style="display:flex; justify-content:flex-end; gap:8px; margin-bottom:10px;">
-            <button class="btn-primary btn-sm" id="btn-manual-add" style="display:none;" onclick="openManualAdd()">+ Add Member</button>
+            <button class="btn-primary btn-sm" id="btn-manual-add" onclick="openManualAdd()">+ Add Member</button>
             <button class="btn-secondary btn-sm" onclick="loadEventSignups(currentEventId)">↻ Refresh</button>
           </div>
           <div class="card table-wrap">
@@ -2009,7 +2009,7 @@ async function openEventDetail(eventId) {
     document.getElementById('toggle-dollar-value').checked = !!ev.show_dollar_value;
     document.getElementById('toggle-visible-before-open').checked = !!ev.visible_before_open;
     document.getElementById('btn-delete-event').style.display = currentMember?.is_exec_team ? '' : 'none';
-    document.getElementById('btn-manual-add').style.display = currentMember?.is_exec_team ? '' : 'none';
+    document.getElementById('btn-manual-add').style.display = '';
 
     pwSetOpen(false);
     loadPassportWines(eventId);

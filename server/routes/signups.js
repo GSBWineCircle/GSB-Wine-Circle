@@ -632,7 +632,7 @@ router.post('/:id/remove-from-lottery', requireAdmin, requireExecTeam, async (re
   }
 });
 
-// POST /api/signups/manual-add — Exec Team: manually invite a member to an
+// POST /api/signups/manual-add — Admin: manually invite a member to an
 // event, bypassing the lottery entirely - including after it has already
 // been run. If the member already has a signup for this event (e.g. they
 // were Waitlisted, Dropped, or never got drawn), that row is turned into an
@@ -640,7 +640,7 @@ router.post('/:id/remove-from-lottery', requireAdmin, requireExecTeam, async (re
 // created. Capacity is NOT enforced - exceeding it is exactly the kind of
 // deliberate override this exists for - but the response flags it so the
 // admin UI can warn rather than silently going over.
-router.post('/manual-add', requireAdmin, requireExecTeam, async (req, res) => {
+router.post('/manual-add', requireAdmin, async (req, res) => {
   const { event_id, member_id } = req.body;
   if (!event_id || !member_id) return res.status(400).json({ error: 'event_id and member_id are required.' });
 
