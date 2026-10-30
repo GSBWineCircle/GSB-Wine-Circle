@@ -10,6 +10,7 @@ const { isPassportEnabledFor, VISIBILITIES, DEFAULT_VISIBILITY, isEventVisibleIn
 const { joinMotifField, buildStamp, abridgeDescription } = require('../services/passportStamp');
 const { researchWine, findBottleImage, generateArt } = require('../services/wineResearch');
 const crypto = require('crypto');
+const { images } = require('../services/imageCache');
 const { normalizeTag, ruleBasedSuggestions } = require('../services/wineTags');
 const {
   MAX_WINES_PER_EVENT, ALLOWED_IMAGE_TYPES, MAX_IMAGE_BYTES,
@@ -181,7 +182,10 @@ adminRouter.put('/events/:eventId/wines', requireAdmin, async (req, res) => {
       }
     }
     const drop = existing.filter(w => !keep.has(w.wine_id)).map(w => w.wine_id);
-    if (drop.length) await client.query('DELETE FROM event_wines WHERE wine_id = ANY($1)', [drop]);
+    if (drop.length) {
+      await client.query('DELETE FROM event_wines WHERE wine_id = ANY($1)', [drop]);
+      drop.forEach(id => images.del('wine:' + id));
+    }
     await client.query('COMMIT');
 
     await audit(req.member.email, 'passport_wines_saved', 'event_wines', req.params.eventId,
@@ -256,6 +260,7 @@ adminRouter.put('/wines/:wineId/image', requireAdmin, async (req, res) => {
       const r = await db.query(
         `UPDATE event_wines SET image=NULL, image_content_type=NULL, image_source='', updated_at=NOW() WHERE wine_id=$1`,
         [req.params.wineId]);
+      images.del('wine:' + req.params.wineId);
       return r.rowCount ? res.json({ ok: true }) : res.status(404).json({ error: 'Wine not found' });
     }
     if (!ALLOWED_IMAGE_TYPES.includes(content_type)) return res.status(400).json({ error: 'Photo must be a JPEG, PNG or WebP.' });
@@ -265,6 +270,7 @@ adminRouter.put('/wines/:wineId/image', requireAdmin, async (req, res) => {
     const r = await db.query(
       `UPDATE event_wines SET image=$2, image_content_type=$3, image_source='upload', updated_at=NOW() WHERE wine_id=$1`,
       [req.params.wineId, buf, content_type]);
+    images.del('wine:' + req.params.wineId);
     if (!r.rowCount) return res.status(404).json({ error: 'Wine not found' });
     res.json({ ok: true });
   } catch (err) {
@@ -295,11 +301,18 @@ adminRouter.put('/wines/:wineId/hidden-tags', requireAdmin, async (req, res) => 
 // ── Public image (unguessable id; same model as welcome photos) ─────────────
 imageRouter.get('/:id', async (req, res) => {
   try {
-    const { rows } = await db.query('SELECT image, image_content_type FROM event_wines WHERE wine_id=$1', [req.params.id]);
-    if (!rows.length || !rows[0].image) return res.status(404).end();
-    res.set('Content-Type', rows[0].image_content_type || 'image/jpeg');
+    // From memory after the first read (see services/imageCache.js); invalidated when the image changes.
+    const key = 'wine:' + req.params.id;
+    let img = images.get(key);
+    if (!img) {
+      const { rows } = await db.query('SELECT image, image_content_type FROM event_wines WHERE wine_id=$1', [req.params.id]);
+      if (!rows.length || !rows[0].image) return res.status(404).end();
+      img = { buf: rows[0].image, type: rows[0].image_content_type || 'image/jpeg' };
+      images.set(key, img.buf, img.type);
+    }
+    res.set('Content-Type', img.type);
     res.set('Cache-Control', 'public, max-age=31536000, immutable');
-    res.send(rows[0].image);
+    res.send(img.buf);
   } catch (err) {
     console.error(err);
     res.status(500).end();

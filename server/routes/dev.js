@@ -5,6 +5,8 @@ const { v4: uuidv4 } = require('uuid');
 const db = require('../db');
 const { requireAdmin } = require('../middleware/auth');
 
+const { MEMBER_COLS } = require('../services/memberCols');
+
 const router = express.Router();
 
 async function devGuard(req, res, next) {
@@ -80,7 +82,7 @@ router.post('/simulate-signups', requireAdmin, devGuard, async (req, res) => {
     const event = evRows[0];
 
     const { rows: testMembers } = await client.query(
-      `SELECT * FROM members WHERE notes LIKE '%TEST%' AND status = 'Active' LIMIT $1`, [count]
+      `SELECT ${MEMBER_COLS} FROM members WHERE notes LIKE '%TEST%' AND status = 'Active' LIMIT $1`, [count]
     );
 
     const created = [];
@@ -181,7 +183,7 @@ router.post('/dev-login', requireAdmin, devGuard, async (req, res) => {
 
   const { hashToken } = require('../middleware/auth');
   const { rows } = await db.query(
-    `SELECT * FROM members WHERE LOWER(email) = $1`, [email.toLowerCase()]
+    `SELECT ${MEMBER_COLS} FROM members WHERE LOWER(email) = $1`, [email.toLowerCase()]
   );
   if (!rows.length) return res.status(404).json({ error: 'Member not found' });
   const member = rows[0];

@@ -20,7 +20,14 @@ router.get('/', requireAdmin, async (req, res) => {
     // Resolve the affected member at read time so older entries get one too:
     // signup entries via the signup's member, member/fee entries via the member
     // id, partner links also name the other half of the pair.
-    const q = `SELECT a.*,
+    // Only the small pieces of the saved before/after snapshots that "member affected"
+    // needs are pulled; the snapshots themselves can be large and the page never shows them.
+    const q = `SELECT a.id, a.created_at, a.admin_email, a.action, a.target_table, a.target_id,
+                      jsonb_build_object('member_name', a.before_state->>'member_name', 'member_email', a.before_state->>'member_email',
+                                         'full_name', a.before_state->>'full_name', 'email', a.before_state->>'email',
+                                         'deleted', CASE WHEN a.action = 'BulkDeleteMembers' THEN a.before_state->'deleted' END) AS before_state,
+                      jsonb_build_object('member_name', a.after_state->>'member_name', 'member_email', a.after_state->>'member_email',
+                                         'full_name', a.after_state->>'full_name', 'email', a.after_state->>'email') AS after_state,
                       COALESCE(sm.full_name, mm.full_name) AS affected_name,
                       COALESCE(sm.email, mm.email)         AS affected_email,
                       pm.full_name                         AS partner_name
@@ -36,7 +43,7 @@ router.get('/', requireAdmin, async (req, res) => {
 
     const { rows: raw } = await db.query(q, params);
     const rows = raw.map(r => {
-      const { affected_name, affected_email, partner_name, ...entry } = r;
+      const { affected_name, affected_email, partner_name, before_state, after_state, ...entry } = r;
       return { ...entry, affected: affectedFrom(r) };
     });
     return res.json({ log: rows });

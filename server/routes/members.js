@@ -9,6 +9,8 @@ const { promoteNextWaitlist } = require('../services/fees');
 const { isValidBirthDateInput } = require('../services/signupLogic');
 const { ALLOWED_IMAGE_TYPES, MAX_IMAGE_BYTES } = require('../services/instagramHelpers');
 
+const { MEMBER_COLS } = require('../services/memberCols');
+
 const router = express.Router();
 
 // GET /api/members — admin: list all members; member: get own record
@@ -137,7 +139,7 @@ router.post('/', requireAdmin, async (req, res) => {
     const { rows } = await db.query(
       `INSERT INTO members (member_id, email, full_name, affiliation, is_admin, is_exec_team, fee_balance, status, notes, school_year, exec_notes)
        VALUES ($1, $2, $3, $4, $5, $6, 0, 'Active', $7, $8, $9)
-       RETURNING *`,
+       RETURNING ${MEMBER_COLS}`,
       [memberId, normalizedEmail, full_name.trim(), affiliation || '', !!is_admin, !!is_exec_team, notes || '', year, exec_notes || '']
     );
     await audit(req.member.email, 'CreateMember', 'members', memberId, null, { email: normalizedEmail });
@@ -236,7 +238,7 @@ router.patch('/:id', requireAdmin, async (req, res) => {
   const { id } = req.params;
   try {
     const { rows: existing } = await db.query(
-      'SELECT * FROM members WHERE member_id = $1', [id]
+      `SELECT ${MEMBER_COLS} FROM members WHERE member_id = $1`, [id]
     );
     if (!existing.length) return res.status(404).json({ error: 'Member not found' });
     const old = existing[0];
@@ -297,7 +299,7 @@ router.patch('/:id', requireAdmin, async (req, res) => {
     const setClauses = Object.keys(updates).map((k, i) => `${k} = $${i + 2}`).join(', ');
     const values = [id, ...Object.values(updates)];
     const { rows } = await db.query(
-      `UPDATE members SET ${setClauses} WHERE member_id = $1 RETURNING *`,
+      `UPDATE members SET ${setClauses} WHERE member_id = $1 RETURNING ${MEMBER_COLS}`,
       values
     );
 
@@ -418,7 +420,7 @@ router.post('/:id/deactivate', requireAdmin, async (req, res) => {
     await client.query('BEGIN');
 
     const { rows: memberRows } = await client.query(
-      `UPDATE members SET status = 'Inactive' WHERE member_id = $1 RETURNING *`, [id]
+      `UPDATE members SET status = 'Inactive' WHERE member_id = $1 RETURNING ${MEMBER_COLS}`, [id]
     );
     if (!memberRows.length) {
       await client.query('ROLLBACK');

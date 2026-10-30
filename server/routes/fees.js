@@ -7,6 +7,8 @@ const { audit } = require('../services/audit');
 const { emailFeePaidConfirm, getSettings } = require('../services/email');
 const { recomputeBalance } = require('../services/fees');
 
+const { MEMBER_COLS } = require('../services/memberCols');
+
 const router = express.Router();
 
 // GET /api/fees/my — member: their own outstanding charges (alias for /mine)
@@ -123,7 +125,7 @@ router.post('/payment', requireExecTeam, async (req, res) => {
   try {
     await client.query('BEGIN');
     const { rows: memberRows } = await client.query(
-      'SELECT * FROM members WHERE member_id = $1 FOR UPDATE', [member_id]
+      `SELECT ${MEMBER_COLS} FROM members WHERE member_id = $1 FOR UPDATE`, [member_id]
     );
     if (!memberRows.length) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Member not found' }); }
 
@@ -169,7 +171,7 @@ router.post('/waiver', requireExecTeam, async (req, res) => {
   try {
     await client.query('BEGIN');
     const { rows: memberRows } = await client.query(
-      'SELECT * FROM members WHERE member_id = $1 FOR UPDATE', [member_id]
+      `SELECT ${MEMBER_COLS} FROM members WHERE member_id = $1 FOR UPDATE`, [member_id]
     );
     if (!memberRows.length) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Member not found' }); }
 

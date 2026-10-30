@@ -268,3 +268,47 @@ describe('audit affected member', () => {
     expect(affectedFrom({ action: 'CreateEvent', after_state: { name: 'X' } })).toBeNull();
   });
 });
+
+describe('database egress guards', () => {
+  const fs = require('fs'), path = require('path');
+  const { MEMBER_COLS } = require('../services/memberCols');
+  const { ImageCache } = require('../services/imageCache');
+
+  test('MEMBER_COLS lists every members column except the ID photo bytes and birth date', () => {
+    const schema = fs.readFileSync(path.join(__dirname, '../schema.sql'), 'utf8');
+    const create = schema.match(/CREATE TABLE IF NOT EXISTS members \(([\s\S]*?)\n\);/)[1];
+    const cols = new Set([...create.matchAll(/^  ([a-z_]+)\s/gm)].map(m => m[1]));
+    for (const m of schema.matchAll(/ALTER TABLE members ADD COLUMN IF NOT EXISTS ([a-z_]+)/g)) cols.add(m[1]);
+    const listed = new Set(MEMBER_COLS.split(',').map(s => s.trim()));
+    const heavy = new Set(['id_photo', 'birth_date']);
+    for (const c of cols) expect([c, listed.has(c)]).toEqual([c, !heavy.has(c)]);
+    for (const l of listed) expect(cols.has(l)).toBe(true);
+  });
+
+  test('no SELECT * / RETURNING * on members in routes', () => {
+    for (const f of ['members', 'fees', 'signups', 'dev']) {
+      const src = fs.readFileSync(path.join(__dirname, `../routes/${f}.js`), 'utf8');
+      expect(src).not.toMatch(/SELECT \* FROM members/);
+      expect(src).not.toMatch(/UPDATE members[^`]*RETURNING \*/);
+    }
+  });
+
+  test('ImageCache: hits, LRU eviction, TTL, explicit invalidation, oversize refusal', () => {
+    const c = new ImageCache({ maxBytes: 100, ttlMs: 1000 });
+    const b = n => Buffer.alloc(n, 1);
+    c.set('a', b(40), 'image/png', 0); c.set('b', b(40), 'image/png', 0);
+    expect(c.get('a', 10).type).toBe('image/png');       // touch a so b is now least recent
+    c.set('c', b(40), 'image/png', 10);                  // 120 > 100: evicts b
+    expect(c.get('b', 10)).toBeNull();
+    expect(c.get('a', 10)).not.toBeNull();
+    expect(c.get('c', 2000)).toBeNull();                 // expired
+    c.set('big', b(80), 'image/png', 0);                 // > half the budget: refused
+    expect(c.get('big', 0)).toBeNull();
+    c.set('wp:1', b(10), 'x', 0); c.set('wine:1', b(10), 'x', 0);
+    c.clear('wp:');
+    expect(c.get('wp:1', 0)).toBeNull();
+    expect(c.get('wine:1', 0)).not.toBeNull();
+    c.del('wine:1');
+    expect(c.bytes).toBeGreaterThanOrEqual(0);
+  });
+});

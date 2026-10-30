@@ -7,6 +7,7 @@ const { audit } = require('../services/audit');
 const ig = require('../services/instagram');
 const { isSelectableMedia, validateSelection, isValidMediaId } = require('../services/instagramHelpers');
 
+const { images } = require('../services/imageCache');
 const router = express.Router();
 const adminRouter = express.Router();
 
@@ -29,13 +30,21 @@ router.get('/', async (req, res) => {
 router.get('/:id/image', async (req, res) => {
   if (!isValidMediaId(req.params.id)) return res.status(404).end();
   try {
-    const { rows } = await db.query('SELECT image, content_type FROM welcome_photos WHERE photo_id = $1', [req.params.id]);
-    if (!rows.length) return res.status(404).end();
-    res.set('Content-Type', rows[0].content_type);
-    // URL carries a ?v= version, so a long cache lifetime is safe.
-    res.set('Cache-Control', 'public, max-age=86400');
+    // Served from memory after the first read: every request used to pull the whole
+    // image out of Postgres (database egress). Cleared whenever the selection changes.
+    const key = 'wp:' + req.params.id;
+    let img = images.get(key);
+    if (!img) {
+      const { rows } = await db.query('SELECT image, content_type FROM welcome_photos WHERE photo_id = $1', [req.params.id]);
+      if (!rows.length) return res.status(404).end();
+      img = { buf: rows[0].image, type: rows[0].content_type };
+      images.set(key, img.buf, img.type);
+    }
+    res.set('Content-Type', img.type);
+    // The URL carries a ?v= version, so browsers can keep it for a year.
+    res.set('Cache-Control', 'public, max-age=31536000, immutable');
     res.set('X-Content-Type-Options', 'nosniff');
-    res.send(rows[0].image);
+    res.send(img.buf);
   } catch (err) {
     console.error(err);
     res.status(500).end();
@@ -105,6 +114,7 @@ adminRouter.put('/selection', requireAdmin, async (req, res) => {
         await client.query('UPDATE welcome_photos SET position = $2 WHERE photo_id = $1', [v.ids[i], i]);
       }
       await client.query('COMMIT');
+      images.clear('wp:');
     } catch (e) {
       await client.query('ROLLBACK').catch(() => {});
       throw e;

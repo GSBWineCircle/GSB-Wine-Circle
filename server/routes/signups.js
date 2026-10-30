@@ -15,6 +15,8 @@ const {
   planAttendanceCorrection,
 } = require('../services/signupLogic');
 
+const { MEMBER_COLS } = require('../services/memberCols');
+
 const router = express.Router();
 
 // POST /api/signups — member: enter lottery for an event
@@ -649,7 +651,7 @@ router.post('/manual-add', requireAdmin, async (req, res) => {
     await client.query('BEGIN');
     const [{ rows: evRows }, { rows: memRows }, { rows: sigRows }] = await Promise.all([
       client.query('SELECT * FROM events WHERE event_id = $1 FOR UPDATE', [event_id]),
-      client.query('SELECT * FROM members WHERE member_id = $1', [member_id]),
+      client.query(`SELECT ${MEMBER_COLS} FROM members WHERE member_id = $1`, [member_id]),
       client.query('SELECT * FROM signups WHERE event_id = $1 AND member_id = $2 FOR UPDATE', [event_id, member_id]),
     ]);
     const event = evRows[0] || null;
