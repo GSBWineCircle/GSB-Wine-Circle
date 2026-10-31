@@ -19,6 +19,10 @@ const {
   canManualAddToEvent,
   canRemoveFromInvited,
   planAttendanceCorrection,
+  assignLotteryResultsWithLinks,
+  buildLotteryUnits,
+  pickWaitlistUnit,
+  shuffle,
   isValidBirthDateInput,
   isValidBirthYear,
   extractBirthYear,
@@ -725,5 +729,79 @@ describe('planAttendanceCorrection (retroactive, finalized events)', () => {
     expect(planAttendanceCorrection({ status: 'Flaked', finalized_from: null }, true).ok).toBe(false); // late decline, not a no-show
     expect(planAttendanceCorrection({ status: 'Dropped' }, true).ok).toBe(false);
     expect(planAttendanceCorrection({ status: 'Pending' }, false).ok).toBe(false);
+  });
+});
+
+describe('linked (partner) lottery entries', () => {
+  // small deterministic RNG so the random tests are repeatable
+  const seeded = seed => () => { seed |= 0; seed = (seed + 0x6D2B79F5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  const solo = id => ({ signup_id: id });
+  const pair = (a, b) => [{ signup_id: a, linked_signup_id: b }, { signup_id: b, linked_signup_id: a }];
+
+  test('mutual links form one two-seat unit; one-sided or orphaned links are solos', () => {
+    const units = buildLotteryUnits([...pair('a', 'b'), solo('c'), { signup_id: 'd', linked_signup_id: 'zz' }, { signup_id: 'e', linked_signup_id: 'f' }, solo('f')]);
+    expect(units.map(u => [u.ids.join('+'), u.seats])).toEqual([['a+b', 2], ['c', 1], ['d', 1], ['e', 1], ['f', 1]]);
+  });
+  test('a pair is priority if either partner is', () => {
+    const [a, b] = pair('a', 'b'); a.priority = true;
+    expect(buildLotteryUnits([a, b])[0].priority).toBe(true);
+  });
+  test('partners always win or lose together, and never exceed capacity (no priority)', () => {
+    const rng = seeded(7);
+    for (let t = 0; t < 500; t++) {
+      const entrants = [...pair('a', 'b'), ...pair('c', 'd'), ...['e', 'f', 'g', 'h', 'i'].map(solo)];
+      const res = assignLotteryResultsWithLinks(entrants, 5, rng);
+      const st = Object.fromEntries(res.map(r => [r.signup_id, r.newStatus]));
+      expect(st.a).toBe(st.b); expect(st.c).toBe(st.d);
+      expect(res.filter(r => r.newStatus === 'Invited').length).toBeLessThanOrEqual(5);
+      expect(res.length).toBe(entrants.length);
+      expect(new Set(res.map(r => r.lottery_rank)).size).toBe(res.length); // unique ranks 1..n
+    }
+  });
+  test('a pair that does not fit the last seat is waitlisted together while a solo takes the seat', () => {
+    // capacity 3: priority solo takes 1, leaving 2 -> pair fits; with capacity 2 the pair cannot, the solo wins.
+    const res = assignLotteryResultsWithLinks([{ signup_id: 'p', priority: true }, ...pair('a', 'b'), solo('c')], 2, () => 0.5);
+    const st = Object.fromEntries(res.map(r => [r.signup_id, r.newStatus]));
+    expect(st.p).toBe('Invited'); expect(st.a).toBe('Waitlist'); expect(st.b).toBe('Waitlist'); expect(st.c).toBe('Invited');
+  });
+  test('priority pairs are always invited, even past capacity', () => {
+    const [a, b] = pair('a', 'b'); a.priority = true;
+    const res = assignLotteryResultsWithLinks([a, b, solo('c')], 1);
+    expect(res.filter(r => r.newStatus === 'Invited').map(r => r.signup_id).sort()).toEqual(['a', 'b']);
+  });
+  test('with no links it behaves like the original lottery: capacity people invited, rest waitlisted', () => {
+    const res = assignLotteryResultsWithLinks(['a', 'b', 'c', 'd', 'e'].map(solo), 3, seeded(1));
+    expect(res.filter(r => r.newStatus === 'Invited').length).toBe(3);
+    expect(res.filter(r => r.newStatus === 'Waitlist').length).toBe(2);
+    expect(res.map(r => r.lottery_rank)).toEqual([1, 2, 3, 4, 5]);
+    expect(res.slice(0, 3).every(r => r.newStatus === 'Invited')).toBe(true);
+  });
+  test('shuffle is uniform (each of 3 items leads about a third of the time)', () => {
+    const rng = seeded(42), lead = { x: 0, y: 0, z: 0 };
+    for (let i = 0; i < 6000; i++) lead[shuffle(['x', 'y', 'z'], rng)[0]]++;
+    Object.values(lead).forEach(n => expect(Math.abs(n - 2000)).toBeLessThan(200));
+  });
+  test('a pair has the same chance of being drawn as one person (unit-level draw)', () => {
+    // 1 pair + 3 solos, capacity 2: each of the 4 units is equally likely to be drawn first.
+    const rng = seeded(99); let pairWins = 0, soloAWins = 0; const N = 8000;
+    for (let i = 0; i < N; i++) {
+      const res = assignLotteryResultsWithLinks([...pair('a', 'b'), solo('c'), solo('d'), solo('e')], 2, rng);
+      const st = Object.fromEntries(res.map(r => [r.signup_id, r.newStatus]));
+      if (st.a === 'Invited') pairWins++;
+      if (st.c === 'Invited') soloAWins++;
+    }
+    // pair needs both seats (P = 1/4 first), a solo wins in many more orders; just assert the pair is not favoured
+    expect(pairWins / N).toBeLessThan(soloAWins / N);
+    expect(pairWins / N).toBeGreaterThan(0.15);
+  });
+
+  test('waitlist promotion: solo head promoted; pair head promoted together only with 2 free seats', () => {
+    const wl = [...pair('a', 'b'), solo('c')];
+    expect(pickWaitlistUnit(wl, 2)).toEqual(['a', 'b']);
+    expect(pickWaitlistUnit(wl, 1)).toEqual(['c']);        // pair skipped, next unit that fits
+    expect(pickWaitlistUnit(wl, 0)).toEqual(['c']);        // solos are never seat-checked (original behaviour)
+    expect(pickWaitlistUnit([...pair('a', 'b')], 1)).toEqual([]);
+    expect(pickWaitlistUnit([solo('x'), ...pair('a', 'b')], 1)).toEqual(['x']);
+    expect(pickWaitlistUnit(wl, 2, 'a')).toEqual(['b']);  // an excluded half dissolves the pair: the other is a solo
   });
 });

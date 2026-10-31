@@ -2047,7 +2047,7 @@ async function loadEventSignups(eventId) {
     tbody.innerHTML = signups.map((s, i) => `
       <tr>
         <td class="text-muted">${s.lottery_rank ?? '—'}</td>
-        <td style="font-weight:600">${esc(s.member_name)}</td>
+        <td style="font-weight:600">${esc(s.member_name)}${s.linked_with ? `<div class="text-muted" style="font-size:11px;font-weight:400">🔗 Entered with ${esc(s.linked_with)}</div>` : ''}</td>
         <td>${esc(s.member_email)}</td>
         <td><span class="badge badge-${s.status.toLowerCase()}">${s.status}</span></td>
         ${showBirthYear ? `<td>${birthYearCell(s)}</td>` : ''}
@@ -2319,8 +2319,8 @@ async function submitManualAdd() {
 async function removeFromLottery(signupId, name) {
   confirm('Remove from lottery', `Remove ${name} from this event's lottery? They won't be drawn. (While signups are still open they could sign up again.)`, 'btn-danger', async () => {
     try {
-      await api('POST', `/signups/${signupId}/remove-from-lottery`);
-      toast('Removed from the lottery', 'success');
+      const r = await api('POST', `/signups/${signupId}/remove-from-lottery`);
+      toast('Removed from the lottery' + (r.partnerKeptAsSolo ? ' — their linked partner stays in as a solo entry' : ''), 'success');
       await loadEventSignups(currentEventId);
     } catch (e) {
       toast('Error: ' + e.message, 'error');

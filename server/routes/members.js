@@ -515,6 +515,21 @@ router.get('/:id/outstanding-charges', requireAuth, async (req, res) => {
 
 // ── Birth-year verification (birthday tastings) ─────────────────────────────
 
+// GET /api/members/me/partner — the caller's registered partner (name only), if any.
+// Drives the "enter the lottery linked with my partner" option at signup.
+router.get('/me/partner', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await db.query(
+      `SELECT p.full_name FROM members m JOIN members p ON p.member_id = m.partner_member_id
+       WHERE m.member_id = $1 AND p.status <> 'Inactive'`, [req.member.member_id]
+    );
+    return res.json({ partner: rows.length ? { name: rows[0].full_name } : null });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal error' });
+  }
+});
+
 // GET /api/members/me/birth-info — member: own verification status. Never
 // returns the photo bytes themselves, just whether one is on file.
 router.get('/me/birth-info', requireAuth, async (req, res) => {

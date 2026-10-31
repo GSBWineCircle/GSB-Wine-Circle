@@ -1,7 +1,7 @@
 // Shared fee-balance and waitlist-promotion helpers used by signups/events/fees routes.
 // Consolidated from three near-duplicate copies (see task-plans/13-fee-balance-deduplication.md).
 const { v4: uuidv4 } = require('uuid');
-const { computeBalance } = require('./signupLogic');
+const { computeBalance, pickWaitlistUnit } = require('./signupLogic');
 
 /**
  * Recompute a member's fee_balance from their fee_ledger and set their
@@ -32,30 +32,42 @@ async function recomputeBalance(client, memberId) {
  *   waitlister would immediately "promote" themselves right back.
  */
 async function promoteNextWaitlist(client, eventId, excludeSignupId) {
-  const params = [eventId];
-  let excludeClause = '';
-  if (excludeSignupId) {
-    params.push(excludeSignupId);
-    excludeClause = `AND s2.signup_id != $${params.length}`;
-  }
   const { rows: waitlist } = await client.query(
-    `SELECT s2.*, m.email AS member_email, m.full_name AS member_name
+    `SELECT s2.signup_id, s2.linked_signup_id, s2.member_id, s2.lottery_rank, m.email AS member_email, m.full_name AS member_name
      FROM signups s2
      JOIN members m ON m.member_id = s2.member_id
-     WHERE s2.event_id = $1 AND s2.status = 'Waitlist' ${excludeClause}
+     WHERE s2.event_id = $1 AND s2.status = 'Waitlist'
      ORDER BY s2.lottery_rank ASC
-     LIMIT 1 FOR UPDATE`,
-    params
+     FOR UPDATE OF s2`,
+    [eventId]
   );
   if (!waitlist.length) return null;
-  const next = waitlist[0];
-  const newDeclineToken = uuidv4().replace(/-/g, '') + uuidv4().replace(/-/g, '');
-  await client.query(
-    `UPDATE signups SET status = 'Invited', decline_token = $1, invite_sent_at = NOW()
-     WHERE signup_id = $2`,
-    [newDeclineToken, next.signup_id]
+
+  // Seats still free, needed only to decide whether a LINKED PAIR at the head of the
+  // waitlist fits (solo entries are promoted without a seat check, as always).
+  const { rows: cap } = await client.query(
+    `SELECT e.capacity,
+            (SELECT COUNT(*) FROM signups x WHERE x.event_id = e.event_id AND x.status IN ('Invited', 'Attended')) AS taken
+     FROM events e WHERE e.event_id = $1`, [eventId]
   );
-  return { ...next, newDeclineToken };
+  const freeSeats = cap.length ? (parseInt(cap[0].capacity) || 0) - parseInt(cap[0].taken) : 0;
+
+  const ids = pickWaitlistUnit(waitlist, freeSeats, excludeSignupId);
+  if (!ids.length) return null;
+
+  const promotedRows = [];
+  for (const id of ids) {
+    const row = waitlist.find(w => w.signup_id === id);
+    const newDeclineToken = uuidv4().replace(/-/g, '') + uuidv4().replace(/-/g, '');
+    await client.query(
+      `UPDATE signups SET status = 'Invited', decline_token = $1, invite_sent_at = NOW()
+       WHERE signup_id = $2`,
+      [newDeclineToken, id]
+    );
+    promotedRows.push({ ...row, newDeclineToken });
+  }
+  // First one is the main result (as before); a linked partner promoted with them rides along.
+  return { ...promotedRows[0], partnerPromoted: promotedRows[1] || null };
 }
 
 module.exports = { recomputeBalance, promoteNextWaitlist };

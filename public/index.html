@@ -235,6 +235,8 @@
     .birth-year-box .birth-year-note { margin: 0 0 10px; color: var(--muted); }
     .birth-year-box input[type=date] { width: 100%; }
     .birth-year-verified-line { display: flex; align-items: center; gap: 8px; color: var(--ok-border, #2e7d32); font-weight: 600; }
+    .link-box { margin: 12px 0; }
+    .link-box .commit-check { margin: 0; align-items: flex-start; }
     #commit-id-photo-preview img { max-width: 100%; max-height: 140px; border-radius: 4px; display: block; }
     /* Calendar */
     .calendar-wrap { background: white; border: 1px solid var(--line); border-radius: 6px; padding: 16px; }
@@ -450,6 +452,14 @@
         </p>
         <div id="commit-birth-year-err" class="err"></div>
       </div>
+    </div>
+
+    <!-- Only shown to members who have a registered partner -->
+    <div id="commit-link-section" class="link-box" style="display:none">
+      <label class="commit-check" for="commit-link-checkbox">
+        <input type="checkbox" id="commit-link-checkbox" />
+        <span id="commit-link-text"></span>
+      </label>
     </div>
 
     <label class="commit-check" for="commit-checkbox">
@@ -760,6 +770,9 @@
       // - there's no point once it has.
       var canVerifyAfterSignup = ev.birth_year_priority && alreadyIn && ss === 'Pending'
         && (ev.status === 'Draft' || ev.status === 'Open' || ev.status === 'Closed');
+      var linkedLine = (alreadyIn && ev.linked_partner_name)
+        ? '<div class="meta">🤝 Entered together with ' + esc(ev.linked_partner_name) + ' — you will win or lose the lottery together.</div>'
+        : '';
       var birthYearLine = ev.birth_year_priority
         ? '<div class="meta">🎂 Born in ' + esc(ev.birth_year_priority) + '? ' +
           (canVerifyAfterSignup
@@ -773,6 +786,7 @@
         '<h3>' + esc(ev.name) + statusPill + '</h3>' +
         (meta ? '<div class="meta">' + esc(meta) + '</div>' : '') +
         dollarLine +
+        linkedLine +
         birthYearLine +
         (ev.description ? '<div class="desc">' + esc(ev.description) + '</div>' : '') +
         '<button class="btn" ' + btnDisabled + ' data-id="' + esc(ev.event_id) + '"' +
@@ -1138,6 +1152,19 @@
     document.getElementById('commit-id-photo-preview').innerHTML = '';
     setErr('commit-birth-year-err', '');
 
+    // Linked entry option: only for members with a registered partner.
+    var linkSection = document.getElementById('commit-link-section');
+    document.getElementById('commit-link-checkbox').checked = false;
+    linkSection.style.display = 'none';
+    apiFetch('GET', '/members/me/partner').then(function (r) {
+      if (!r.partner || !pendingSignupBtn) return;
+      document.getElementById('commit-link-text').textContent =
+        'Join lottery linked with my partner, ' + r.partner.name + '. I recognize that by selecting this option, ' +
+        'we will both collectively receive one entry to the lottery and will either win or lose the lottery together. ' +
+        'If I do not select this option, we may receive different lottery results and may not be able to attend together.';
+      linkSection.style.display = 'block';
+    }).catch(function () { /* no partner info: just no option */ });
+
     var birthYear = btn.getAttribute('data-birth-year-priority');
     var section = document.getElementById('commit-birth-year-section');
     if (birthYear) {
@@ -1400,16 +1427,18 @@
       }
     }
 
+    var linkPartner = document.getElementById('commit-link-section').style.display !== 'none'
+      && document.getElementById('commit-link-checkbox').checked;
     closeCommitOverlay();
-    signUp(btn);
+    signUp(btn, linkPartner);
   }
 
-  async function signUp(btn) {
+  async function signUp(btn, linkPartner) {
     var eventId = btn.getAttribute('data-id');
     var orig = btn.textContent;
     btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Signing up…';
     try {
-      var res = await apiFetch('POST', '/signups', { event_id: eventId });
+      var res = await apiFetch('POST', '/signups', { event_id: eventId, link_partner: !!linkPartner });
       if (res.alreadySignedUp) {
         alert('You\'re already signed up for this event.');
       }
