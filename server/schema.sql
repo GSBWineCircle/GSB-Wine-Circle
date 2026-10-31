@@ -390,3 +390,12 @@ CREATE TABLE IF NOT EXISTS event_passport_settings (
   visibility TEXT NOT NULL DEFAULT 'after' CHECK (visibility IN ('hidden', 'start', 'after')),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- ── Linked (partner) lottery entries ─────────────────────────────────────────
+-- A member with a registered partner can enter the lottery "linked" with them:
+-- both get a signup row pointing at each other here, the pair counts as ONE
+-- entry in the draw, takes two seats, and wins or loses together. NULL (the
+-- default) is an ordinary solo entry. SET NULL so removing one half of a pair
+-- (e.g. Exec removing someone from the lottery) leaves the other as a solo entry.
+ALTER TABLE signups ADD COLUMN IF NOT EXISTS linked_signup_id TEXT REFERENCES signups (signup_id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_signups_linked ON signups (linked_signup_id);

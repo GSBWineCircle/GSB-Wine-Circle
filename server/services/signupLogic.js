@@ -93,6 +93,106 @@ function canRemoveFromInvited({ isExec, eventDate, graceHours, now = new Date() 
 }
 
 /**
+ * Fisher-Yates shuffle (uniform, unlike `sort(() => Math.random() - 0.5)`).
+ * Returns a new array.
+ */
+function shuffle(arr, rng = Math.random) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+/**
+ * Group lottery entrants into draw units: a solo entry is one unit of one seat;
+ * two partners who entered LINKED (each pointing at the other, both in this
+ * list) are ONE unit of two seats. A link whose other half isn't also in the
+ * list (they dropped out, were removed, or already left Pending) is just a solo.
+ * @param {Array<{signup_id: string, linked_signup_id?: string|null, priority?: boolean}>} entrants
+ * @returns {Array<{ids: string[], seats: number, priority: boolean}>}
+ */
+function buildLotteryUnits(entrants) {
+  const byId = new Map(entrants.map(e => [e.signup_id, e]));
+  const used = new Set();
+  const units = [];
+  for (const e of entrants) {
+    if (used.has(e.signup_id)) continue;
+    const other = e.linked_signup_id && byId.get(e.linked_signup_id);
+    if (other && other.linked_signup_id === e.signup_id && other.signup_id !== e.signup_id) {
+      used.add(e.signup_id); used.add(other.signup_id);
+      // Guaranteed-entry status belongs to the pair if EITHER partner has it.
+      units.push({ ids: [e.signup_id, other.signup_id], seats: 2, priority: !!(e.priority || other.priority) });
+    } else {
+      used.add(e.signup_id);
+      units.push({ ids: [e.signup_id], seats: 1, priority: !!e.priority });
+    }
+  }
+  return units;
+}
+
+/**
+ * Lottery with linked (partner) entries. Each unit is drawn once - so a pair
+ * has exactly the same chance as one person - and wins or loses as a whole.
+ * Priority units (admins, exec, verified birth-year matches) are always invited,
+ * as before, even past capacity. The rest are drawn in a uniformly random order
+ * and invited while they FIT in the remaining seats; a pair that doesn't fit the
+ * last seat is waitlisted (together), and a later solo can still take that seat.
+ * With no links this is equivalent to assignLotteryResultsWithPriority.
+ *
+ * @param {Array<{signup_id: string, linked_signup_id?: string|null, priority?: boolean}>} entrants
+ * @param {number} capacity seats
+ * @param {() => number} [rng] injectable for tests
+ * @returns {Array<{signup_id: string, lottery_rank: number, newStatus: 'Invited'|'Waitlist'}>}
+ */
+function assignLotteryResultsWithLinks(entrants, capacity, rng = Math.random) {
+  const units = shuffle(buildLotteryUnits(entrants), rng);
+  const out = [];
+  let rank = 0;
+  const emit = (unit, newStatus) => unit.ids.forEach(id => out.push({ signup_id: id, lottery_rank: ++rank, newStatus }));
+
+  const priority = units.filter(u => u.priority);
+  priority.forEach(u => emit(u, 'Invited'));
+  let remaining = Math.max(0, capacity - priority.reduce((n, u) => n + u.seats, 0));
+
+  for (const u of units.filter(x => !x.priority)) {
+    if (u.seats <= remaining) { remaining -= u.seats; emit(u, 'Invited'); }
+    else emit(u, 'Waitlist');
+  }
+  // Keep waitlisted units in drawn order but after all the invited ones, like the original ranking.
+  const invited = out.filter(r => r.newStatus === 'Invited');
+  const waitlisted = out.filter(r => r.newStatus === 'Waitlist');
+  return [...invited, ...waitlisted].map((r, i) => ({ ...r, lottery_rank: i + 1 }));
+}
+
+/**
+ * Choose which waitlisted signup(s) to promote next when a seat frees up.
+ * Waitlisted rows must be in lottery-rank order. A signup whose partner is also
+ * on the waitlist (mutual link) is promoted TOGETHER, and only when `freeSeats`
+ * covers both; otherwise that pair is skipped for now and the next unit that
+ * fits is promoted. Solo entries are promoted as before (no seat check), so
+ * existing behaviour for events without pairs is unchanged.
+ * @param {Array<{signup_id: string, linked_signup_id?: string|null}>} waitlist
+ * @param {number} freeSeats capacity minus seats already taken
+ * @param {string} [excludeSignupId]
+ * @returns {string[]} signup ids to promote (empty if nothing fits)
+ */
+function pickWaitlistUnit(waitlist, freeSeats, excludeSignupId) {
+  const rows = waitlist.filter(r => r.signup_id !== excludeSignupId);
+  const byId = new Map(rows.map(r => [r.signup_id, r]));
+  for (const r of rows) {
+    const other = r.linked_signup_id && byId.get(r.linked_signup_id);
+    if (other && other.linked_signup_id === r.signup_id) {
+      if (freeSeats >= 2) return [r.signup_id, other.signup_id];
+      continue;
+    }
+    return [r.signup_id];
+  }
+  return [];
+}
+
+/**
  * Assign lottery ranks and statuses to a list of pending signups.
  *
  * @param {Array<{signup_id: string}>} pendingSignups — already shuffled or in desired order
@@ -275,6 +375,10 @@ module.exports = {
   planAttendanceCorrection,
   assignLotteryResults,
   assignLotteryResultsWithPriority,
+  assignLotteryResultsWithLinks,
+  buildLotteryUnits,
+  pickWaitlistUnit,
+  shuffle,
   shouldAutoPromote,
   classifyFinalizeSignups,
   isMemberBlocked,

@@ -8,6 +8,7 @@ const { getSettings, emailFlakeBatch } = require('../services/email');
 const { recomputeBalance } = require('../services/fees');
 const {
   assignLotteryResultsWithPriority,
+  assignLotteryResultsWithLinks,
   classifyFinalizeSignups,
   hasBirthYearPriority,
   isValidBirthYear,
@@ -24,9 +25,11 @@ router.get('/', requireAuth, async (req, res) => {
     const { rows } = await db.query(
       `SELECT DISTINCT e.*,
               s.signup_id, s.member_visible_status AS signup_status, s.lottery_rank,
-              s.invite_sent_at, s.decline_token, s.declined_at
+              s.invite_sent_at, s.decline_token, s.declined_at,
+              CASE WHEN lp.status <> 'Dropped' THEN lp.member_name END AS linked_partner_name
        FROM events e
        LEFT JOIN signups s ON s.event_id = e.event_id AND s.member_id = $1
+       LEFT JOIN signups lp ON lp.signup_id = s.linked_signup_id
        WHERE e.status = 'Open' OR s.signup_id IS NOT NULL
              OR (e.status = 'Draft' AND e.visible_before_open = TRUE)
        ORDER BY e.event_date ASC NULLS LAST`,
@@ -218,24 +221,21 @@ router.post('/:id/run-lottery', requireAdmin, async (req, res) => {
     // priority has to be decided here, not inferred later. The actual photo
     // bytes are never selected, just whether one exists.
     const { rows: pending } = await client.query(
-      `SELECT s.signup_id, m.is_admin, m.is_exec_team, m.birth_date, (m.id_photo IS NOT NULL) AS has_id_photo
+      `SELECT s.signup_id, s.linked_signup_id, m.is_admin, m.is_exec_team, m.birth_date, (m.id_photo IS NOT NULL) AS has_id_photo
        FROM signups s JOIN members m ON m.member_id = s.member_id
        WHERE s.event_id = $1 AND s.status = 'Pending'`, [id]
     );
 
-    // Shuffle (Fisher-Yates via random sort) before splitting by priority, so
-    // both the guaranteed group and the randomly-drawn group get an
-    // independently random relative order.
-    const shuffled = pending
-      .sort(() => Math.random() - 0.5)
-      .map(r => ({
-        signup_id: r.signup_id,
-        priority: !!(r.is_admin || r.is_exec_team || hasBirthYearPriority(r, event.birth_year_priority)),
-      }));
+    // Linked partner entries are drawn as ONE unit (two seats, win/lose together);
+    // the draw shuffles those units uniformly (see assignLotteryResultsWithLinks).
+    const entrants = pending.map(r => ({
+      signup_id: r.signup_id,
+      linked_signup_id: r.linked_signup_id,
+      priority: !!(r.is_admin || r.is_exec_team || hasBirthYearPriority(r, event.birth_year_priority)),
+    }));
     const capacity = parseInt(event.capacity) || 60;
 
-    // Use shared logic to assign ranks and statuses
-    const results = assignLotteryResultsWithPriority(shuffled, capacity);
+    const results = assignLotteryResultsWithLinks(entrants, capacity);
     for (const r of results) {
       await client.query(
         `UPDATE signups SET lottery_rank = $1, status = $2 WHERE signup_id = $3`,
@@ -245,7 +245,7 @@ router.post('/:id/run-lottery', requireAdmin, async (req, res) => {
 
     const inviteCount = results.filter(r => r.newStatus === 'Invited').length;
     const waitlistCount = results.filter(r => r.newStatus === 'Waitlist').length;
-    const priorityCount = shuffled.filter(s => s.priority).length;
+    const priorityCount = entrants.filter(s => s.priority).length;
 
     await client.query(
       `UPDATE events SET status = 'Lotteried', lottery_run_at = NOW() WHERE event_id = $1`, [id]
@@ -533,8 +533,11 @@ router.get('/:id/signups', requireAdmin, async (req, res) => {
     // this list needs to expose.
     const { rows } = await db.query(
       `SELECT s.*, m.email AS member_email, m.full_name AS member_name, m.affiliation,
-              m.birth_date, (m.id_photo IS NOT NULL) AS has_id_photo
+              m.birth_date, (m.id_photo IS NOT NULL) AS has_id_photo,
+              CASE WHEN lp.status <> 'Dropped' THEN lm.full_name END AS linked_with
        FROM signups s JOIN members m ON m.member_id = s.member_id
+       LEFT JOIN signups lp ON lp.signup_id = s.linked_signup_id
+       LEFT JOIN members lm ON lm.member_id = lp.member_id
        WHERE s.event_id = $1
        ORDER BY s.lottery_rank ASC NULLS LAST, s.signed_up_at ASC`,
       [req.params.id]

@@ -20,20 +20,36 @@ const { MEMBER_COLS } = require('../services/memberCols');
 const router = express.Router();
 
 // POST /api/signups — member: enter lottery for an event
+// Body: { event_id, link_partner?: boolean }. With link_partner, a member who has a
+// registered partner enters BOTH of them as one linked entry: one draw, two seats,
+// win or lose together. Without it, they enter alone as usual.
 router.post('/', requireAuth, async (req, res) => {
   const { event_id } = req.body;
+  const linkPartner = req.body.link_partner === true;
   if (!event_id) return res.status(400).json({ error: 'event_id required' });
 
   const client = await db.connect();
   try {
     await client.query('BEGIN');
 
-    // Check member is not blocked
-    const { rows: memberRows } = await client.query(
-      `SELECT fee_balance, status FROM members WHERE member_id = $1 FOR UPDATE`, [req.member.member_id]
+    // Check member is not blocked. When linking, lock the partner's row too (in a fixed id
+    // order, so two partners signing up at once can't deadlock) and look them up.
+    const { rows: me } = await client.query(
+      `SELECT partner_member_id FROM members WHERE member_id = $1`, [req.member.member_id]
     );
-    if (!memberRows.length) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Member not found' }); }
-    const m = memberRows[0];
+    const partnerId = linkPartner && me.length ? me[0].partner_member_id : null;
+    if (linkPartner && !partnerId) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: "You don't have a registered partner to link with." });
+    }
+    const lockIds = [req.member.member_id, partnerId].filter(Boolean).sort();
+    const { rows: locked } = await client.query(
+      `SELECT member_id, full_name, email, fee_balance, status FROM members WHERE member_id = ANY($1) ORDER BY member_id FOR UPDATE`,
+      [lockIds]
+    );
+    const m = locked.find(r => r.member_id === req.member.member_id);
+    if (!m) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Member not found' }); }
+    const partner = partnerId ? locked.find(r => r.member_id === partnerId) : null;
 
     const settings = await getSettings(client);
     if (isMemberBlocked(m)) {
@@ -72,23 +88,50 @@ router.post('/', requireAuth, async (req, res) => {
       return res.json({ signup: existing[0], alreadySignedUp: true });
     }
 
-    const signupId = 's_' + uuidv4().replace(/-/g, '');
-    const declineToken = uuidv4().replace(/-/g, '') + uuidv4().replace(/-/g, '');
-    const { rows } = await client.query(
-      `INSERT INTO signups
-         (signup_id, event_id, event_name, member_id, member_name, member_email,
-          email_at_signup, status, decline_token)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'Pending', $8)
-       RETURNING *`,
-      [
-        signupId, event_id, event.name,
-        req.member.member_id, req.member.full_name, req.member.email,
-        req.member.email, declineToken,
-      ]
-    );
+    if (partner) {
+      // Both halves of a linked entry must be able to enter. (Deliberately vague about WHY the
+      // partner can't - another member's fee status isn't ours to tell.)
+      if (partner.status === 'Inactive' || isMemberBlocked(partner)) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ error: "Your partner can't be entered into this lottery right now, so you can't link entries. You can still enter on your own." });
+      }
+      const { rows: partnerExisting } = await client.query(
+        `SELECT signup_id FROM signups WHERE event_id = $1 AND member_id = $2`, [event_id, partner.member_id]
+      );
+      if (partnerExisting.length) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ error: "Your partner is already signed up for this event on their own. Ask them to withdraw first if you'd like to enter together, or enter on your own." });
+      }
+    }
+
+    const insertSignup = async (mem) => {
+      const signupId = 's_' + uuidv4().replace(/-/g, '');
+      const declineToken = uuidv4().replace(/-/g, '') + uuidv4().replace(/-/g, '');
+      const { rows } = await client.query(
+        `INSERT INTO signups
+           (signup_id, event_id, event_name, member_id, member_name, member_email,
+            email_at_signup, status, decline_token)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'Pending', $8)
+         RETURNING *`,
+        [signupId, event_id, event.name, mem.member_id, mem.full_name, mem.email, mem.email, declineToken]
+      );
+      return rows[0];
+    };
+
+    let mine = await insertSignup({ member_id: req.member.member_id, full_name: m.full_name, email: m.email });
+    if (partner) {
+      const theirs = await insertSignup(partner);
+      await client.query('UPDATE signups SET linked_signup_id = $2 WHERE signup_id = $1', [mine.signup_id, theirs.signup_id]);
+      await client.query('UPDATE signups SET linked_signup_id = $2 WHERE signup_id = $1', [theirs.signup_id, mine.signup_id]);
+      mine = { ...mine, linked_signup_id: theirs.signup_id };
+    }
 
     await client.query('COMMIT');
-    return res.status(201).json({ signup: rows[0] });
+    if (partner) {
+      audit(req.member.email, 'LinkedSignup', 'signups', mine.signup_id, null,
+        { event_id, partner_member_id: partner.member_id, partner_signup_id: mine.linked_signup_id });
+    }
+    return res.status(201).json({ signup: mine, linkedWith: partner ? partner.full_name : null });
   } catch (err) {
     await client.query('ROLLBACK');
     console.error(err);
@@ -624,7 +667,9 @@ router.post('/:id/remove-from-lottery', requireAdmin, requireExecTeam, async (re
 
     const { event_status, decline_token, ...before } = s;
     await audit(req.member.email, 'RemoveFromLottery', 'signups', req.params.id, before, null);
-    return res.json({ ok: true });
+    // If this was half of a linked pair, the database unlinks the other half (ON DELETE SET NULL),
+    // which stays in the lottery as an ordinary solo entry.
+    return res.json({ ok: true, partnerKeptAsSolo: !!s.linked_signup_id });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     console.error(err);
