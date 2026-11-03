@@ -35,6 +35,30 @@ router.get('/', requireAuth, async (req, res) => {
        ORDER BY e.event_date ASC NULLS LAST`,
       [req.member.member_id]
     );
+    // host_notes is admin-only internal text: never send it down the member portal.
+    return res.json({ events: rows.map(({ host_notes, ...ev }) => ev) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal error' });
+  }
+});
+
+// GET /api/events/past — member: every event that has already started (whether or not
+// the caller signed up or won), newest first, with the caller's own signup status if
+// any. Drafts and cancelled events never happened, so they're left out. Must be
+// declared before /:id.
+router.get('/past', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await db.query(
+      `SELECT e.event_id, e.name, e.event_date, e.location,
+              s.member_visible_status AS my_status
+       FROM events e
+       LEFT JOIN signups s ON s.event_id = e.event_id AND s.member_id = $1
+       WHERE e.event_date IS NOT NULL AND e.event_date < NOW()
+         AND e.status NOT IN ('Draft', 'Cancelled')
+       ORDER BY e.event_date DESC`,
+      [req.member.member_id]
+    );
     return res.json({ events: rows });
   } catch (err) {
     console.error(err);
@@ -73,6 +97,8 @@ router.get('/:id', requireAuth, async (req, res) => {
       mySignup = { ...mySignup, status: mySignup.member_visible_status };
       delete mySignup.member_visible_status;
     }
+    // Members never get the admin-only host notes (admins still do, for the admin portal).
+    if (!req.isAdmin) delete event.host_notes;
     return res.json({ event, mySignup });
   } catch (err) {
     console.error(err);

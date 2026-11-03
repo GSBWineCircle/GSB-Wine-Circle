@@ -264,6 +264,7 @@
     .dot-signed-up { background: #2a4a8a; }
     .dot-won       { background: #2a6638; }
     .dot-lost      { background: #8a5a1a; }
+    .dot-past      { background: #9a9a9a; }
     .cal-legend { display: flex; flex-wrap: wrap; gap: 10px 14px; margin-top: 12px; font-size: 12px; color: var(--muted); }
     .cal-legend .legend-item { display: flex; align-items: center; gap: 4px; }
     .cal-legend .cal-dot { width: 8px; height: 8px; }
@@ -393,6 +394,9 @@
 
         <h2>My history</h2>
         <div id="history-list"><div class="loading-pulse"></div></div>
+
+        <h2>Past events</h2>
+        <div id="past-events-list"><div class="loading-pulse"></div></div>
       </div>
 
       <aside class="home-side">
@@ -410,6 +414,7 @@
             <span class="legend-item"><span class="cal-dot dot-signed-up"></span> Pending Lottery</span>
             <span class="legend-item"><span class="cal-dot dot-won"></span> Won lottery</span>
             <span class="legend-item"><span class="cal-dot dot-lost"></span> Lost lottery</span>
+            <span class="legend-item"><span class="cal-dot dot-past"></span> Past event</span>
           </div>
         </div>
       </aside>
@@ -553,7 +558,6 @@
   var pendingDeclineSignupId = null;
   var calMonthCursor = null;   // first-of-month Date being displayed
   var calDayMap = {};          // 'YYYY-MM-DD' -> [{name, category}]
-  var calAutoFocused = false;  // jump to the nearest event's month once, on first load
 
   // ── Init ──────────────────────────────────────────────────────────────────
 
@@ -621,6 +625,7 @@
     loadInvitations();
     loadFees();
     loadHistory();
+    loadPastEvents();
     loadCalendar();
   }
 
@@ -670,6 +675,47 @@
     } catch (err) {
       container.innerHTML = '<div class="section-empty">Couldn\'t load history.</div>';
     }
+  }
+
+  // Every event that has already happened, for every member - including ones they
+  // never entered or didn't win. Newest first; shows a handful, with "Show all".
+  var pastEventsAll = [];
+  var pastEventsExpanded = false;
+  var PAST_EVENTS_PREVIEW = 6;
+
+  async function loadPastEvents() {
+    var container = document.getElementById('past-events-list');
+    try {
+      var res = await apiFetch('GET', '/events/past');
+      pastEventsAll = res.events || [];
+      renderPastEvents();
+    } catch (err) {
+      container.innerHTML = '<div class="section-empty">Couldn\'t load past events.</div>';
+    }
+  }
+
+  function showAllPastEvents() { pastEventsExpanded = true; renderPastEvents(); }
+
+  function renderPastEvents() {
+    var container = document.getElementById('past-events-list');
+    if (!pastEventsAll.length) { container.innerHTML = '<div class="section-empty">No past events yet.</div>'; return; }
+    var items = pastEventsExpanded ? pastEventsAll : pastEventsAll.slice(0, PAST_EVENTS_PREVIEW);
+    var label = { Attended: 'Attended', Declined: 'Declined', Dropped: 'Declined', Flaked: 'Flaked', Lost: 'Not selected', Invited: 'Invited', Waitlist: 'Waitlisted', Pending: 'Entered' };
+    var html = items.map(function (ev) {
+      var meta = [fmtDate(ev.event_date), ev.location].filter(Boolean).join(' · ');
+      // A pill only when the member actually had an entry - otherwise the event is just listed.
+      var pill = ev.my_status
+        ? '<span class="pill ' + esc(String(ev.my_status).toLowerCase()) + '">' + esc(label[ev.my_status] || ev.my_status) + '</span>'
+        : '';
+      return '<div class="card history-card" data-event-id="' + esc(ev.event_id) + '" onclick="openEventDetail(this.getAttribute(\'data-event-id\'))">' +
+        '<h3>' + esc(ev.name || '(unnamed event)') + pill + '</h3>' +
+        (meta ? '<div class="meta">' + esc(meta) + '</div>' : '') +
+      '</div>';
+    }).join('');
+    if (!pastEventsExpanded && pastEventsAll.length > PAST_EVENTS_PREVIEW) {
+      html += '<button class="btn secondary" style="margin-top:4px" onclick="showAllPastEvents()">Show all ' + pastEventsAll.length + ' past events</button>';
+    }
+    container.innerHTML = html;
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -924,9 +970,11 @@
       var results = await Promise.all([
         apiFetch('GET', '/events'),
         apiFetch('GET', '/signups/my'),
+        apiFetch('GET', '/events/past').catch(function () { return { events: [] }; }),
       ]);
       var events = results[0].events || [];
       var signups = results[1].signups || [];
+      var pastEvents = results[2].events || [];
 
       var map = {};
       function addDot(dateStr, eventId, name, category) {
@@ -949,19 +997,21 @@
       // open+relevant events list above still belong on the calendar.
       signups.forEach(function (s) {
         if (seenEventIds[s.event_id]) return;
+        seenEventIds[s.event_id] = true;
         addDot(s.event_date, s.event_id, s.event_name, calCategorize(s.status));
       });
 
-      calDayMap = map;
+      // Past events the member never entered (or that dropped out of the lists above) still
+      // belong on the calendar, in a neutral colour unless they have a result of their own.
+      pastEvents.forEach(function (ev) {
+        if (seenEventIds[ev.event_id]) return;
+        seenEventIds[ev.event_id] = true;
+        addDot(ev.event_date, ev.event_id, ev.name, ev.my_status ? calCategorize(ev.my_status) : 'past');
+      });
 
-      if (!calAutoFocused) {
-        calAutoFocused = true;
-        var allDays = Object.keys(map).sort();
-        if (allDays.length) {
-          var nearest = new Date(allDays[0] + 'T00:00:00');
-          calMonthCursor = new Date(nearest.getFullYear(), nearest.getMonth(), 1);
-        }
-      }
+      calDayMap = map;
+      // The calendar opens on the current month (renderCalendar's default when no month
+      // has been picked); it no longer jumps to the earliest event's month.
       renderCalendar();
     } catch (err) {
       var grid = document.getElementById('cal-grid');
