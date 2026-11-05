@@ -1045,7 +1045,16 @@
       <div id="page-settings" class="page">
         <div class="page-header"><h2>Settings</h2></div>
         <div id="settings-body"></div>
-      </div>
+
+        <div class="section-title">Database usage <span style="text-transform:none;letter-spacing:0;font-weight:400;">(Exec Team)</span></div>
+        <div class="card card-body" style="margin-bottom:20px;">
+          <p style="font-size:13px;color:var(--muted);margin-bottom:10px;">
+            Estimated data pulled out of the database, by endpoint, since the server last restarted. Supabase bills this as
+            egress (free plan: 5&nbsp;GB/month). Use it to see what is driving usage.
+          </p>
+          <button class="btn-secondary btn-sm" onclick="loadDbUsage()">↻ Refresh</button>
+          <div id="db-usage-body" style="margin-top:12px;font-size:13px;"></div>
+        </div>
 
     </main>
   </div>
@@ -1548,7 +1557,7 @@ function nav(page) {
   if (page === 'fees')       { loadOutstanding(); switchFeesTab('outstanding'); }
   if (page === 'audit')      { auditPage = 1; loadAudit(); }
   if (page === 'email-log')  { emailLogPage = 1; loadEmailLog(); }
-  if (page === 'settings')   loadSettings();
+  if (page === 'settings')   { loadSettings(); loadDbUsage(); }
   if (page === 'welcome-photos') loadWelcomePhotos();
   if (page === 'analytics')  loadAnalytics();
   if (page === 'reviews')    loadReviews();
@@ -3327,6 +3336,21 @@ async function loadEmailLog() {
 }
 
 /* ── Settings ────────────────────────────────────────────────────────────── */
+async function loadDbUsage() {
+  const box = document.getElementById('db-usage-body');
+  box.innerHTML = '<span class="spinner"></span>';
+  try {
+    const r = await api('GET', '/admin/db-usage');
+    const fmt = n => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : n >= 1024 ? (n / 1024).toFixed(1) + ' KB' : n + ' B';
+    box.innerHTML = `<div style="margin-bottom:8px;"><strong>${fmt(r.total_bytes)}</strong> since ${esc(new Date(r.since).toLocaleString())}</div>
+      <div class="table-wrap"><table><thead><tr><th>Endpoint</th><th>Calls</th><th>Total</th><th>Avg / call</th></tr></thead><tbody>
+      ${r.endpoints.slice(0, 15).map(e => `<tr><td class="monospace" style="font-size:12px">${esc(e.endpoint)}</td><td>${e.calls}</td><td>${fmt(e.bytes)}</td><td>${fmt(e.avg_bytes_per_call)}</td></tr>`).join('') || '<tr><td colspan="4" class="text-muted">Nothing recorded yet.</td></tr>'}
+      </tbody></table></div>`;
+  } catch (e) {
+    box.innerHTML = `<span class="text-muted">${esc(e.status === 403 ? 'Only the Exec Team can see this.' : e.message)}</span>`;
+  }
+}
+
 async function loadSettings() {
   const body = document.getElementById('settings-body');
   body.innerHTML = '<div class="text-muted"><span class="spinner"></span> Loading…</div>';

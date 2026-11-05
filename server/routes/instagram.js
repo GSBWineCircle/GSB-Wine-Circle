@@ -8,6 +8,7 @@ const ig = require('../services/instagram');
 const { isSelectableMedia, validateSelection, isValidMediaId } = require('../services/instagramHelpers');
 
 const { images } = require('../services/imageCache');
+const { optimizeImage } = require('../services/imageOptimize');
 const router = express.Router();
 const adminRouter = express.Router();
 
@@ -38,6 +39,14 @@ router.get('/:id/image', async (req, res) => {
       const { rows } = await db.query('SELECT image, content_type FROM welcome_photos WHERE photo_id = $1', [req.params.id]);
       if (!rows.length) return res.status(404).end();
       img = { buf: rows[0].image, type: rows[0].content_type };
+      // Photos stored before optimisation existed are shrunk once, here, and saved back, so every
+      // later cache refill (each server restart) reads the small version instead of the original.
+      const opt = await optimizeImage(img.buf);
+      if (opt.changed) {
+        img = { buf: opt.buffer, type: opt.contentType };
+        await db.query('UPDATE welcome_photos SET image = $2, content_type = $3 WHERE photo_id = $1',
+          [req.params.id, img.buf, img.type]).catch(e => console.error('Could not save optimised welcome photo:', e.message));
+      }
       images.set(key, img.buf, img.type);
     }
     res.set('Content-Type', img.type);
@@ -95,8 +104,10 @@ adminRouter.put('/selection', requireAdmin, async (req, res) => {
     for (const id of v.ids.filter(i => !have.has(i))) {
       const m = await ig.getMedia(id);
       if (!isSelectableMedia(m)) return res.status(400).json({ error: 'One of the chosen posts is not a photo.' });
-      const { buffer, contentType } = await ig.downloadImage(m.media_url);
-      fresh.push({ id, permalink: m.permalink || '', caption: (m.caption || '').slice(0, 500), buffer, contentType });
+      const dl = await ig.downloadImage(m.media_url);
+      const opt = await optimizeImage(dl.buffer); // store a screen-sized copy, not the original
+      fresh.push({ id, permalink: m.permalink || '', caption: (m.caption || '').slice(0, 500),
+                   buffer: opt.buffer, contentType: opt.contentType || dl.contentType });
     }
 
     const client = await db.connect();

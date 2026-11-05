@@ -18,6 +18,9 @@ const pool = new Pool({
   idleTimeoutMillis: 30000,
 });
 
+// Estimate database egress per endpoint (see services/dbMeter.js).
+require('./services/dbMeter').wrapPool(pool);
+
 pool.on('error', (err) => {
   console.error('Unexpected DB pool error:', err);
 });

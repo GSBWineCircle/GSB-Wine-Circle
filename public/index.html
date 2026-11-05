@@ -1565,7 +1565,27 @@
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
+  // The home page asks for the same lists from several places at once (events, my signups, past
+  // events). Identical GETs made within a couple of seconds share ONE request, and any write
+  // clears that so a refresh right after an action always sees fresh data.
+  var recentGets = {};
+  var SHARE_GET_MS = 2000;
+
   async function apiFetch(method, path, body) {
+    if (method !== 'GET') {
+      recentGets = {};
+    } else {
+      var hit = recentGets[path];
+      if (hit && Date.now() - hit.t < SHARE_GET_MS) return hit.p;
+      var p = rawApiFetch(method, path, body);
+      recentGets[path] = { t: Date.now(), p: p };
+      p.catch(function () { delete recentGets[path]; }); // never share a failure
+      return p;
+    }
+    return rawApiFetch(method, path, body);
+  }
+
+  async function rawApiFetch(method, path, body) {
     var opts = {
       method: method,
       headers: { 'Content-Type': 'application/json' },

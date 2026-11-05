@@ -8,6 +8,7 @@ const cookieParser = require('cookie-parser');
 const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 const cron = require('node-cron');
 
+const dbMeter = require('./services/dbMeter');
 const { sessionMiddleware } = require('./middleware/auth');
 const authRoutes = require('./routes/auth');
 const membersRoutes = require('./routes/members');
@@ -22,6 +23,7 @@ const analyticsRoutes = require('./routes/analytics');
 const instagramRoutes = require('./routes/instagram');
 const reviewsRoutes = require('./routes/reviews');
 const passportRoutes = require('./routes/passport');
+const dbUsageRoutes = require('./routes/dbusage');
 
 const path = require('path');
 
@@ -123,6 +125,7 @@ app.use('/api/auth/send-code', authLimiter);
 app.use('/api/auth/verify-code', authLimiter);
 
 // ── Session resolution ────────────────────────────────────────────────────────
+app.use(dbMeter.middleware);
 app.use(sessionMiddleware);
 
 // ── Health check ──────────────────────────────────────────────────────────────
@@ -147,6 +150,7 @@ app.use('/api/reviews', reviewsRoutes);
 app.use('/api/passport/admin', passportRoutes.adminRouter);
 app.use('/api/passport', passportRoutes.memberRouter);
 app.use('/api/passport-images', passportRoutes.imageRouter);
+app.use('/api/admin/db-usage', dbUsageRoutes);
 
 // ── Static frontend ───────────────────────────────────────────────────────────
 const publicDir = path.join(__dirname, '..', 'public');
@@ -203,6 +207,9 @@ cron.schedule('0 4 * * 1', async () => {
     console.error('Instagram token refresh failed:', err.message);
   }
 });
+
+// Hourly summary of which endpoints pull the most data out of the database (see services/dbMeter.js).
+cron.schedule('0 * * * *', () => dbMeter.logTop());
 
 // Auto-open/close signups based on signup_opens_at/signup_closes_at, for
 // events where those fields are actually set (an empty field always means

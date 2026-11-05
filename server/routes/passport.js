@@ -11,6 +11,7 @@ const { joinMotifField, buildStamp, abridgeDescription } = require('../services/
 const { researchWine, findBottleImage, generateArt } = require('../services/wineResearch');
 const crypto = require('crypto');
 const { images } = require('../services/imageCache');
+const { optimizeImage } = require('../services/imageOptimize');
 const { normalizeTag, ruleBasedSuggestions } = require('../services/wineTags');
 const {
   MAX_WINES_PER_EVENT, ALLOWED_IMAGE_TYPES, MAX_IMAGE_BYTES,
@@ -49,10 +50,11 @@ async function enrichWine(wineId) {
     if (!w.has_image) {
       const img = await findBottleImage(w);
       if (img) {
+        const opt = await optimizeImage(img.buffer, { maxDim: 900 });
         await db.query(
           `UPDATE event_wines SET image = $2, image_content_type = $3, image_source = $4, updated_at = NOW()
            WHERE wine_id = $1 AND image IS NULL`,
-          [wineId, img.buffer, img.contentType, 'auto:' + img.source]);
+          [wineId, opt.buffer, opt.contentType || img.contentType, 'auto:' + img.source]);
       }
     }
   } catch (err) {
@@ -267,9 +269,10 @@ adminRouter.put('/wines/:wineId/image', requireAdmin, async (req, res) => {
     const buf = Buffer.from(String(image_base64 || '').replace(/^data:[^;]+;base64,/, ''), 'base64');
     if (!buf.length) return res.status(400).json({ error: 'Invalid photo data.' });
     if (buf.length > MAX_IMAGE_BYTES) return res.status(400).json({ error: 'Photo is too large (4 MB max).' });
+    const opt = await optimizeImage(buf, { maxDim: 900 });
     const r = await db.query(
       `UPDATE event_wines SET image=$2, image_content_type=$3, image_source='upload', updated_at=NOW() WHERE wine_id=$1`,
-      [req.params.wineId, buf, content_type]);
+      [req.params.wineId, opt.buffer, opt.contentType || content_type]);
     images.del('wine:' + req.params.wineId);
     if (!r.rowCount) return res.status(404).json({ error: 'Wine not found' });
     res.json({ ok: true });
@@ -308,6 +311,13 @@ imageRouter.get('/:id', async (req, res) => {
       const { rows } = await db.query('SELECT image, image_content_type FROM event_wines WHERE wine_id=$1', [req.params.id]);
       if (!rows.length || !rows[0].image) return res.status(404).end();
       img = { buf: rows[0].image, type: rows[0].image_content_type || 'image/jpeg' };
+      // Self-migrate photos stored before optimisation existed (see welcome photos).
+      const opt = await optimizeImage(img.buf, { maxDim: 900 });
+      if (opt.changed) {
+        img = { buf: opt.buffer, type: opt.contentType };
+        await db.query('UPDATE event_wines SET image = $2, image_content_type = $3 WHERE wine_id = $1',
+          [req.params.id, img.buf, img.type]).catch(e => console.error('Could not save optimised wine image:', e.message));
+      }
       images.set(key, img.buf, img.type);
     }
     res.set('Content-Type', img.type);

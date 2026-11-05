@@ -312,3 +312,55 @@ describe('database egress guards', () => {
     expect(c.bytes).toBeGreaterThanOrEqual(0);
   });
 });
+
+describe('image optimisation + egress meter', () => {
+  const sharp = require('sharp');
+  const { optimizeImage } = require('../services/imageOptimize');
+  const { rowBytes } = require('../services/dbMeter');
+
+  // A large, noisy (poorly compressible) photo-like JPEG
+  const bigJpeg = async (w, h) => {
+    const raw = Buffer.alloc(w * h * 3);
+    for (let i = 0; i < raw.length; i++) raw[i] = (i * 31 + (i >> 5) * 17 + ((i * 2654435761) >>> 24)) & 255;
+    return sharp(raw, { raw: { width: w, height: h, channels: 3 } }).jpeg({ quality: 92 }).toBuffer();
+  };
+
+  test('shrinks a large photo to WebP within 1600px and far fewer bytes', async () => {
+    const src = await bigJpeg(3000, 2000);
+    expect(src.length).toBeGreaterThan(500 * 1024);
+    const out = await optimizeImage(src);
+    expect(out.changed).toBe(true);
+    expect(out.contentType).toBe('image/webp');
+    expect(out.buffer.length).toBeLessThan(src.length / 2);
+    const meta = await sharp(out.buffer).metadata();
+    expect(meta.format).toBe('webp');
+    expect(Math.max(meta.width, meta.height)).toBeLessThanOrEqual(1600);
+  });
+  test('is idempotent: an already-optimised image is not re-encoded again', async () => {
+    const once = await optimizeImage(await bigJpeg(3000, 2000), { force: true });
+    expect(once.changed).toBe(true);
+    const twice = await optimizeImage(once.buffer, { force: true });
+    expect(twice.changed).toBe(false);
+    expect(twice.buffer).toBe(once.buffer);
+  });
+  test('honours a custom max dimension', async () => {
+    const out = await optimizeImage(await bigJpeg(2000, 1500), { maxDim: 900 });
+    const meta = await sharp(out.buffer).metadata();
+    expect(Math.max(meta.width, meta.height)).toBeLessThanOrEqual(900);
+  });
+  test('leaves small images and garbage untouched (never throws)', async () => {
+    const small = await sharp({ create: { width: 100, height: 100, channels: 3, background: '#a33' } }).jpeg().toBuffer();
+    expect((await optimizeImage(small)).changed).toBe(false);
+    const junk = Buffer.alloc(400 * 1024, 7);
+    const spy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const r = await optimizeImage(junk);
+    spy.mockRestore();
+    expect(r.changed).toBe(false);
+    expect(r.buffer).toBe(junk);
+    expect((await optimizeImage(null)).changed).toBe(false);
+  });
+  test('rowBytes counts buffers and strings at their size', () => {
+    expect(rowBytes({ a: Buffer.alloc(1000), b: 'x'.repeat(50), c: null })).toBe(7 + (4 + 1000) + (4 + 50) + 4);
+    expect(rowBytes({ n: 5, ok: true, d: new Date(), j: { k: 1 } })).toBeGreaterThan(30);
+  });
+});
