@@ -297,7 +297,7 @@ async function emailFlakeBatch(flakedMembers, event, settings) {
 
   const plainBody =
     `Hi all (bcc'd),\n\n` +
-    `You are receiving this notice because our records show that you either (1) failed to attend or (2) came >20 mins late (per policy) to the ${event.name} event on Thursday, and as a result, your Wine Circle membership is temporarily on pause. (Note, per the policy, declining the calendar invite does not count as notice, and you must email the organizer >24 hours before the event that you have to miss in order to avoid the flake fee).\n\n` +
+    `You are receiving this notice because our records show that you either (1) failed to attend, (2) came >20 mins late (per policy), or (3) left the event over half an hour before the scheduled end time for the ${event.name} event on Thursday, and as a result, your Wine Circle membership is temporarily on pause. (Note, per the policy, declining the calendar invite does not count as notice, and you must email the organizer >24 hours before the event that you have to miss in order to avoid the flake fee).\n\n` +
     `If you're hoping to attend upcoming events, please complete the $30 fee${payUrl ? ` (${payUrl})` : ''}, upload a screenshot of your payment confirmation here, and shoot a quick note to Luke Forsthoefel to ensure you get back on the list.\n\n` +
     `Otherwise, let us know if you think this is in error.\n\n` +
     `Thanks,\nGSB Wine Circle Leadership`;
@@ -305,8 +305,9 @@ async function emailFlakeBatch(flakedMembers, event, settings) {
   const payLinkHtml = payUrl ? `<a href="${escapeHtml(payUrl)}">here</a>` : 'here';
   const htmlBody =
     `<p>Hi all (bcc'd),</p>` +
-    `<p>You are receiving this notice because our records show that you either (1) failed to attend or ` +
-    `(2) came &gt;20 mins late (per policy) to the ${escapeHtml(event.name)} event on Thursday, and as a result, ` +
+    `<p>You are receiving this notice because our records show that you either (1) failed to attend, ` +
+    `(2) came &gt;20 mins late (per policy), or (3) left the event over half an hour before the scheduled end time ` +
+    `for the ${escapeHtml(event.name)} event on Thursday, and as a result, ` +
     `your Wine Circle membership is temporarily on pause. (Note, per the policy, declining the calendar invite ` +
     `does not count as notice, and you must email the organizer &gt;24 hours before the event that you have to ` +
     `miss in order to avoid the flake fee).</p>` +
