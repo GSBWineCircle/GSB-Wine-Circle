@@ -296,6 +296,9 @@
     .pagination .page-info { font-size: 13px; color: var(--muted); }
 
     /* ── Attendance checklist ─────────────────────────────────────────────── */
+    .att-toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+    .att-toolbar input[type=search] { flex: 1 1 220px; min-width: 0; }
+    .att-toolbar select { flex: 0 0 auto; width: auto; }
     .attendance-list { display: flex; flex-direction: column; gap: 8px; }
     .attendance-item {
       display: flex; align-items: center; gap: 12px; padding: 10px 14px;
@@ -759,6 +762,12 @@
           <p class="text-muted" style="margin-bottom:14px; font-size:13px;">
             Check off members who attended. Invited and waitlisted members are shown (in case a waitlisted member showed up anyway).
           </p>
+          <div class="att-toolbar">
+            <input type="search" id="att-search" placeholder="Search by name or email…" autocomplete="off"
+                   oninput="renderAttendance()" aria-label="Search attendees" />
+            <select id="att-filter" onchange="renderAttendance()" aria-label="Filter by status"></select>
+            <span id="att-count" class="text-muted" style="font-size:12px;white-space:nowrap;"></span>
+          </div>
           <div class="attendance-list" id="attendance-list"></div>
         </div>
       </div>
@@ -1992,6 +2001,8 @@ async function openEventDetail(eventId) {
 
   // Reset tabs
   switchTab('signups');
+  document.getElementById('att-search').value = '';
+  document.getElementById('att-filter').value = 'all';
 
   try {
     const evRes = await api('GET', `/events/${eventId}`);
@@ -2140,56 +2151,107 @@ function birthYearCell(s) {
   return badge + viewBtn;
 }
 
+// Attendance list: the signups are fetched once, then searched/filtered in the browser.
+let attSignups = [];
+
+const ATT_FILTERS_OPEN = [
+  ['all', 'All'], ['notyet', 'Not marked yet'], ['Attended', 'Attended'], ['Invited', 'Invited'], ['Waitlist', 'Waitlisted'],
+];
+const ATT_FILTERS_FINAL = [
+  ['all', 'All'], ['Attended', 'Attended'], ['Flaked', 'No-show'], ['Lost', 'Waitlist, did not attend'],
+];
+
+function attIsFinal() { return currentEventStatus === 'Completed'; }
+
 async function loadAttendance() {
   const list = document.getElementById('attendance-list');
   list.innerHTML = '<div class="text-muted" style="padding:20px;text-align:center"><span class="spinner"></span> Loading…</div>';
   try {
     const attRes = await api('GET', `/events/${currentEventId}/signups`);
     const signups = attRes.signups || attRes;
+    attSignups = attIsFinal()
+      // Finalized: only people whose attendance finalize settled.
+      ? signups.filter(s => s.status === 'Attended' || (s.status === 'Flaked' && s.finalized_from === 'Invited') || (s.status === 'Lost' && s.finalized_from === 'Waitlist'))
+      : signups.filter(s => ['Invited', 'Waitlist', 'Attended'].includes(s.status));
 
-    // Finalized: fees and statuses are settled, so the plain checkboxes would leave them inconsistent.
-    // Exec Team can correct one person at a time (adjusting the flake fee); others can roll the whole event back.
-    if (currentEventStatus === 'Completed') {
-      const rows = signups.filter(s => s.status === 'Attended' || (s.status === 'Flaked' && s.finalized_from === 'Invited') || (s.status === 'Lost' && s.finalized_from === 'Waitlist'));
-      const isExec = !!currentMember?.is_exec_team;
-      const banner = `<div class="card card-body" style="margin-bottom:12px;font-size:13px;">
-        <strong>This event is finalized.</strong> ${isExec
-          ? 'To fix a mistake, correct that person below: the flake fee is waived or charged automatically, and the change is recorded in the audit log.'
-          : 'Only the Exec Team can correct one person\'s attendance now. You can also use <em>Roll Back Finalize</em> to reopen the whole event.'}
-      </div>`;
-      if (!rows.length) { list.innerHTML = banner + '<div class="empty-state"><div class="empty-icon">📋</div><p>No attendance to show.</p></div>'; return; }
-      const label = { Attended: 'Attended', Flaked: 'No-show (fee charged)', Lost: 'Waitlist, did not attend' };
-      list.innerHTML = banner + rows.map(s => `
-        <div class="attendance-item ${s.status === 'Attended' ? 'attended' : ''}" style="display:flex;align-items:center;gap:12px;justify-content:space-between;">
-          <div>
-            <div class="name">${esc(s.member_name)}</div>
-            <div class="sub">${esc(s.member_email)} · <span class="badge badge-${s.status.toLowerCase()}">${label[s.status]}</span></div>
-          </div>
-          ${isExec ? (s.status === 'Attended'
-            ? `<button class="btn-danger btn-sm" onclick="openCorrectAttendance('${s.signup_id}', '${esc(s.member_name).replace(/'/g, '&#39;')}', false)">Mark as no-show</button>`
-            : `<button class="btn-success btn-sm" onclick="openCorrectAttendance('${s.signup_id}', '${esc(s.member_name).replace(/'/g, '&#39;')}', true)">Mark as attended</button>`) : ''}
-        </div>`).join('');
-      return;
-    }
-
-    const eligible = signups.filter(s => ['Invited', 'Waitlist', 'Attended'].includes(s.status));
-    if (!eligible.length) {
-      list.innerHTML = '<div class="empty-state"><div class="empty-icon">📋</div><p>No invited members yet.</p></div>';
-      return;
-    }
-    list.innerHTML = eligible.map(s => `
-      <label class="attendance-item ${s.status === 'Attended' ? 'attended' : ''}" id="att-${s.signup_id}">
-        <input type="checkbox" ${s.status === 'Attended' ? 'checked' : ''}
-          onchange="markAttendance('${s.signup_id}', this.checked)" />
-        <div>
-          <div class="name">${esc(s.member_name)}</div>
-          <div class="sub">${esc(s.member_email)} · <span class="badge badge-${s.status.toLowerCase()}">${s.status}</span></div>
-        </div>
-      </label>
-    `).join('');
+    // Rebuild the filter choices for this mode, keeping the current search/filter if still valid.
+    const sel = document.getElementById('att-filter');
+    const prev = sel.value;
+    const opts = attIsFinal() ? ATT_FILTERS_FINAL : ATT_FILTERS_OPEN;
+    sel.innerHTML = opts.map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
+    sel.value = opts.some(([v]) => v === prev) ? prev : 'all';
+    renderAttendance();
   } catch (e) {
     list.innerHTML = `<div class="text-danger" style="padding:20px">Error: ${esc(e.message)}</div>`;
   }
+}
+
+function attMatches(s, q, f) {
+  if (q) {
+    const hay = `${s.member_name || ''} ${s.member_email || ''}`.toLowerCase();
+    if (!q.split(/\s+/).every(w => hay.includes(w))) return false; // every word must appear
+  }
+  if (f === 'all') return true;
+  if (f === 'notyet') return s.status === 'Invited' || s.status === 'Waitlist';
+  return s.status === f;
+}
+
+function renderAttendance() {
+  const list = document.getElementById('attendance-list');
+  const q = document.getElementById('att-search').value.trim().toLowerCase();
+  const f = document.getElementById('att-filter').value || 'all';
+  const rows = attSignups.filter(s => attMatches(s, q, f));
+  document.getElementById('att-count').textContent = attSignups.length
+    ? (rows.length === attSignups.length ? `${rows.length} people` : `${rows.length} of ${attSignups.length}`) : '';
+
+  const isFinal = attIsFinal();
+  const isExec = !!currentMember?.is_exec_team;
+  let banner = '';
+  if (isFinal) {
+    // Finalized: fees and statuses are settled, so the plain checkboxes would leave them inconsistent.
+    // Exec Team can correct one person at a time (adjusting the flake fee); others can roll the whole event back.
+    banner = `<div class="card card-body" style="margin-bottom:12px;font-size:13px;">
+      <strong>This event is finalized.</strong> ${isExec
+        ? 'To fix a mistake, correct that person below: the flake fee is waived or charged automatically, and the change is recorded in the audit log.'
+        : 'Only the Exec Team can correct one person\'s attendance now. You can also use <em>Roll Back Finalize</em> to reopen the whole event.'}
+    </div>`;
+  }
+  if (!attSignups.length) {
+    list.innerHTML = banner + (isFinal
+      ? '<div class="empty-state"><div class="empty-icon">📋</div><p>No attendance to show.</p></div>'
+      : '<div class="empty-state"><div class="empty-icon">📋</div><p>No invited members yet.</p></div>');
+    return;
+  }
+  if (!rows.length) {
+    list.innerHTML = banner + '<div class="empty-state"><div class="empty-icon">🔍</div><p>No one matches that search or filter.</p></div>';
+    return;
+  }
+
+  if (isFinal) {
+    const label = { Attended: 'Attended', Flaked: 'No-show (fee charged)', Lost: 'Waitlist, did not attend' };
+    list.innerHTML = banner + rows.map(s => `
+      <div class="attendance-item ${s.status === 'Attended' ? 'attended' : ''}" style="display:flex;align-items:center;gap:12px;justify-content:space-between;">
+        <div>
+          <div class="name">${esc(s.member_name)}</div>
+          <div class="sub">${esc(s.member_email)} · <span class="badge badge-${s.status.toLowerCase()}">${label[s.status]}</span></div>
+        </div>
+        ${isExec ? (s.status === 'Attended'
+          ? `<button class="btn-danger btn-sm" onclick="openCorrectAttendance('${s.signup_id}', '${esc(s.member_name).replace(/'/g, '&#39;')}', false)">Mark as no-show</button>`
+          : `<button class="btn-success btn-sm" onclick="openCorrectAttendance('${s.signup_id}', '${esc(s.member_name).replace(/'/g, '&#39;')}', true)">Mark as attended</button>`) : ''}
+      </div>`).join('');
+    return;
+  }
+
+  list.innerHTML = rows.map(s => `
+    <label class="attendance-item ${s.status === 'Attended' ? 'attended' : ''}" id="att-${s.signup_id}">
+      <input type="checkbox" ${s.status === 'Attended' ? 'checked' : ''}
+        onchange="markAttendance('${s.signup_id}', this.checked)" />
+      <div>
+        <div class="name">${esc(s.member_name)}</div>
+        <div class="sub">${esc(s.member_email)} · <span class="badge badge-${s.status.toLowerCase()}">${s.status}</span></div>
+      </div>
+    </label>
+  `).join('');
 }
 
 // Exec-only retroactive correction (after the event was finalized).
@@ -2224,9 +2286,17 @@ async function submitCorrectAttendance() {
 
 async function markAttendance(signupId, attended) {
   try {
-    await api('POST', `/signups/${signupId}/attendance`, { attended });
+    const r = await api('POST', `/signups/${signupId}/attendance`, { attended });
+    // Keep the in-memory list current so search/filters stay right, without re-rendering (the row
+    // would vanish or jump under the cursor while you are checking people off).
+    const row = attSignups.find(x => x.signup_id === signupId);
+    if (row && r.signup) row.status = r.signup.status;
     const el = document.getElementById(`att-${signupId}`);
-    if (el) el.classList.toggle('attended', attended);
+    if (el) {
+      el.classList.toggle('attended', attended);
+      const badge = el.querySelector('.badge');
+      if (badge && r.signup) { badge.className = `badge badge-${r.signup.status.toLowerCase()}`; badge.textContent = r.signup.status; }
+    }
     toast(attended ? 'Attendance marked' : 'Attendance unmarked', 'success');
   } catch (e) {
     toast('Error: ' + e.message, 'error');
