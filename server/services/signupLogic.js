@@ -6,6 +6,20 @@
 'use strict';
 
 /**
+ * Normalise an event's per-member dollar value from request input.
+ * '' / null / undefined mean "not set" (null, distinct from $0). Anything else must be a
+ * finite, non-negative number - parseFloat('abc') is NaN, which Postgres NUMERIC happily
+ * stores, and which then poisons every total built from it.
+ * @returns {{ok: true, value: number|null} | {ok: false}}
+ */
+function parseDollarValue(input) {
+  if (input === '' || input === null || input === undefined) return { ok: true, value: null };
+  const n = typeof input === 'number' ? input : Number(String(input).trim());
+  if (!Number.isFinite(n) || n < 0 || n > 99999999) return { ok: false };
+  return { ok: true, value: Math.round(n * 100) / 100 };
+}
+
+/**
  * Compute a member's outstanding fee balance from raw ledger rows.
  * @param {Array<{type: string, amount: string|number}>} ledgerRows
  * @returns {number}  balance (never negative)
@@ -379,6 +393,7 @@ module.exports = {
   buildLotteryUnits,
   pickWaitlistUnit,
   shuffle,
+  parseDollarValue,
   shouldAutoPromote,
   classifyFinalizeSignups,
   isMemberBlocked,

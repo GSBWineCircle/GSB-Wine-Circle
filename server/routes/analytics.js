@@ -104,7 +104,7 @@ router.get('/export.xlsx', requireAdmin, requireExecTeam, async (req, res) => {
     addSummaryRow('% Given a Chance', events.map(e => pct(totals[e.event_id].pctGivenChance)));
     addSummaryRow('% Attended of Given a Chance', events.map(e => pct(totals[e.event_id].pctAttendedOfGivenChance)));
     addSummaryRow('Dollar Value', events.map(e => totals[e.event_id].dollarValue != null ? '$' + totals[e.event_id].dollarValue.toFixed(2) : ''));
-    addSummaryRow('Total Dollar Value', events.map(e => '$' + totals[e.event_id].totalDollarValue.toFixed(2)));
+    addSummaryRow('Total Dollar Value', events.map(e => '$' + (totals[e.event_id].totalDollarValue || 0).toFixed(2)));
 
     ws.columns.forEach((col, i) => { col.width = i < fixedCols.length ? 24 : 14; });
     ws.views = [{ state: 'frozen', xSplit: fixedCols.length, ySplit: 1 }];

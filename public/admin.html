@@ -3515,7 +3515,8 @@ function computeMemberAggregate(memberId, events, cells) {
     if (status === 'Flaked') flaked++;
     if (status === 'Attended') {
       attended++;
-      if (e.dollar_value != null) totalValue += parseFloat(e.dollar_value);
+      const dv = parseFloat(e.dollar_value);
+      if (Number.isFinite(dv)) totalValue += dv;
     }
   });
   return { applied, attended, flaked, totalValue };
@@ -3618,7 +3619,7 @@ function renderAnalyticsOverview(rows, events, totals) {
     return `<tr><td style="font-weight:600;">${esc(e.name)}</td>
       <td>${t.applied}</td><td>${t.dropped}</td><td>${t.flaked}</td><td>${t.attended}</td><td>${pct(t.pctAttended)}</td>
       <td>${t.givenChance}</td><td>${pct(t.pctAttendedOfGivenChance)}</td>
-      <td>${t.dollarValue != null ? '$' + t.dollarValue.toFixed(2) : '—'}</td><td>$${t.totalDollarValue.toFixed(2)}</td></tr>`;
+      <td>${t.dollarValue != null ? '$' + t.dollarValue.toFixed(2) : '—'}</td><td>$${(t.totalDollarValue || 0).toFixed(2)}</td></tr>`;
   }).join('');
 
   el.innerHTML = `
@@ -3679,7 +3680,7 @@ function renderMemberHistory() {
       <td style="font-weight:600;">${esc(event.name)}</td>
       <td>${event.event_date ? fmtDate(event.event_date) : '—'}</td>
       <td><span class="badge badge-${status.toLowerCase()}">${esc(status)}</span></td>
-      <td>${status === 'Attended' && event.dollar_value != null ? '$' + parseFloat(event.dollar_value).toFixed(2) : '—'}</td>
+      <td>${status === 'Attended' && Number.isFinite(parseFloat(event.dollar_value)) ? '$' + parseFloat(event.dollar_value).toFixed(2) : '—'}</td>
     </tr>
   `).join('');
 
@@ -3690,7 +3691,7 @@ function renderMemberHistory() {
   const dropped = rows.filter(r => r.status === 'Dropped').length;
   const flaked = rows.filter(r => r.status === 'Flaked').length;
   const totalDollarValue = rows
-    .filter(r => r.status === 'Attended' && r.event.dollar_value != null)
+    .filter(r => r.status === 'Attended' && Number.isFinite(parseFloat(r.event.dollar_value)))
     .reduce((sum, r) => sum + parseFloat(r.event.dollar_value), 0);
   const pct = (n, d) => d ? Math.round((n / d) * 100) + '%' : '—';
 

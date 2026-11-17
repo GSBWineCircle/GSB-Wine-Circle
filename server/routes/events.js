@@ -12,6 +12,7 @@ const {
   classifyFinalizeSignups,
   hasBirthYearPriority,
   isValidBirthYear,
+  parseDollarValue,
 } = require('../services/signupLogic');
 
 const router = express.Router();
@@ -114,6 +115,8 @@ router.post('/', requireAdmin, async (req, res) => {
     dollar_value, show_dollar_value, visible_before_open, birth_year_priority,
   } = req.body;
   if (!name) return res.status(400).json({ error: 'name required' });
+  const dollar = parseDollarValue(dollar_value);
+  if (!dollar.ok) return res.status(400).json({ error: 'Dollar value must be a number, 0 or more (or left blank).' });
 
   // Birth-year priority grants an automatic lottery win, the same as
   // Admin/Exec - gated to Exec Team even though event creation itself isn't.
@@ -152,7 +155,7 @@ router.post('/', requireAdmin, async (req, res) => {
         description || '', host_notes || '',
         signup_opens_at || null, signup_closes_at || null,
         autoInvite, sendLost,
-        dollar_value === '' || dollar_value === undefined ? null : parseFloat(dollar_value),
+        dollar.value,
         showDollarValue, visibleBeforeOpen, birthYearPriority, req.member.email,
       ]
     );
@@ -180,6 +183,11 @@ router.patch('/:id', requireAdmin, async (req, res) => {
     const updates = {};
     allowed.forEach(f => { if (req.body[f] !== undefined) updates[f] = req.body[f]; });
     if (!Object.keys(updates).length) return res.status(400).json({ error: 'No valid fields' });
+    if ('dollar_value' in updates) {
+      const dv = parseDollarValue(updates.dollar_value);
+      if (!dv.ok) return res.status(400).json({ error: 'Dollar value must be a number, 0 or more (or left blank).' });
+      updates.dollar_value = dv.value;
+    }
 
     // Birth-year priority grants an automatic lottery win, the same as
     // Admin/Exec - gated to Exec Team even though editing events isn't.

@@ -43,7 +43,9 @@ function buildAnalyticsMatrix(members, events, signupRows) {
     t.pctAttended = t.applied ? t.attended / t.applied : 0;
     t.pctGivenChance = t.applied ? t.givenChance / t.applied : 0;
     t.pctAttendedOfGivenChance = t.givenChance ? t.attended / t.givenChance : 0;
-    t.dollarValue = e.dollar_value != null ? parseFloat(e.dollar_value) : null;
+    // A malformed stored value (e.g. NUMERIC 'NaN') counts as "not set" rather than poisoning every total.
+    const dv = e.dollar_value != null ? parseFloat(e.dollar_value) : null;
+    t.dollarValue = Number.isFinite(dv) ? dv : null;
     t.totalDollarValue = t.dollarValue != null ? t.dollarValue * t.attended : 0;
     grandTotalDollarValue += t.totalDollarValue;
   });
